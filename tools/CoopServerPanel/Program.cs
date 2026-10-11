@@ -110,7 +110,7 @@ app.MapGet("/", () => Results.Content(page, "text/html; charset=utf-8"));
 
 app.MapPost("/api/login", async (LoginRequest request, HttpContext context, LoginThrottle throttle, ActivityLog log) =>
 {
-    string address = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    string address = ClientAddress(context);
     if (!throttle.IsAllowed(address))
         return Results.Json(new { error = "too_many_attempts" }, statusCode: StatusCodes.Status429TooManyRequests);
 
@@ -225,6 +225,18 @@ await app.RunAsync();
 return 0;
 
 static string UserOf(HttpContext context) => context.User.Identity?.Name ?? "?";
+
+// Through a Cloudflare tunnel every request arrives from this computer, so wrong-password
+// lockouts would hit everyone at once. The tunnel names the real visitor in CF-Connecting-IP;
+// only a local connection may claim that, otherwise anyone could pick their own address.
+static string ClientAddress(HttpContext context)
+{
+    System.Net.IPAddress remote = context.Connection.RemoteIpAddress;
+    string forwarded = context.Request.Headers["CF-Connecting-IP"];
+    if (remote != null && System.Net.IPAddress.IsLoopback(remote) && !string.IsNullOrWhiteSpace(forwarded))
+        return forwarded.Trim();
+    return remote?.ToString() ?? "unknown";
+}
 
 static IResult Accepted(bool started, string error) => started
     ? Results.Json(new { ok = true }, statusCode: StatusCodes.Status202Accepted)

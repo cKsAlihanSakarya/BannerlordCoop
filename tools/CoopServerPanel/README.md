@@ -40,7 +40,14 @@ The panel and the server must run with the same rights. If the server is started
 
 ## Reaching the panel from other computers
 
-The panel speaks plain HTTP. The simplest safe setup is a private network such as Tailscale on the host and on each player's PC, then open `http://<host tailscale ip>:8090`. Forwarding TCP 8090 on the router also works but sends the panel password unencrypted.
+The simplest way is a Cloudflare quick tunnel, which gives an https address and needs nothing on the players' side. Keep `ListenUrl` at `http://127.0.0.1:8090` so the panel itself stays local, then on the host:
+
+```
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel --url http://localhost:8090
+```
+
+It prints a `https://<words>.trycloudflare.com` address to share. The address changes each time `cloudflared` restarts; a named tunnel on a Cloudflare account keeps a fixed one. Use a long panel password, because the address is reachable from anywhere.
 
 ## Manual test
 
