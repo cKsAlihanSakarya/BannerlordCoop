@@ -54,6 +54,12 @@ public sealed class PanelSettings
     /// <summary>Also post when a player joins or leaves.</summary>
     public bool DiscordNotifyPlayers { get; set; } = true;
 
+    /// <summary>
+    /// Proxy for the bot's Discord traffic, such as socks5://127.0.0.1:40000 or http://127.0.0.1:8080.
+    /// Empty uses Windows' proxy settings. Needed where Discord is blocked, as in Turkey.
+    /// </summary>
+    public string DiscordProxy { get; set; } = "";
+
     /// <summary>Test hook: the Discord REST base. Leave at the default.</summary>
     public string DiscordApiBase { get; set; } = "https://discord.com/api/v10";
 
@@ -125,6 +131,9 @@ public sealed class PanelSettings
         if (DiscordEnabled && !ulong.TryParse(DiscordGuildId, out _))
             throw new InvalidDataException("DiscordGuildId must be the server ID when DiscordToken is set.");
         DiscordRoleIds ??= Array.Empty<string>();
+        DiscordProxy ??= "";
+        if (DiscordProxy.Trim().Length > 0 && !Uri.TryCreate(DiscordProxy.Trim(), UriKind.Absolute, out _))
+            throw new InvalidDataException("DiscordProxy must look like socks5://127.0.0.1:40000 or http://127.0.0.1:8080.");
     }
 
     private static string GeneratePassword()

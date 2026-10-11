@@ -16,7 +16,14 @@ public sealed class DiscordRest : IDisposable
     public DiscordRest(PanelSettings settings)
     {
         apiBase = settings.DiscordApiBase.TrimEnd('/');
-        http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        IWebProxy proxy = ProxyFor(settings);
+        var handler = new SocketsHttpHandler();
+        if (proxy != null)
+        {
+            handler.Proxy = proxy;
+            handler.UseProxy = true;
+        }
+        http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bot", settings.DiscordToken.Trim());
         http.DefaultRequestHeaders.UserAgent.ParseAdd("DiscordBot (https://github.com/Bannerlord-Coop-Team/BannerlordCoop, 1.0)");
     }
@@ -57,6 +64,22 @@ public sealed class DiscordRest : IDisposable
     }
 
     public void Dispose() => http.Dispose();
+
+    /// <summary>The proxy from DiscordProxy, or null to use Windows' own proxy settings.</summary>
+    public static IWebProxy ProxyFor(PanelSettings settings)
+    {
+        string address = settings.DiscordProxy?.Trim();
+        return string.IsNullOrEmpty(address) ? null : new WebProxy(new Uri(address));
+    }
+
+    /// <summary>An exception's message with its inner ones, which say why a TLS handshake failed.</summary>
+    public static string Describe(Exception exception)
+    {
+        var parts = new List<string>();
+        for (Exception current = exception; current != null && parts.Count < 4; current = current.InnerException)
+            parts.Add(current.Message);
+        return string.Join(" | ", parts);
+    }
 }
 
 public sealed class DiscordException : Exception
@@ -84,6 +107,7 @@ public sealed class DiscordGateway
     private const int OpHello = 10;
     private const int OpHeartbeatAck = 11;
 
+    private readonly PanelSettings settings;
     private readonly string token;
     private readonly string gatewayUrl;
     private readonly ILogger logger;
@@ -96,6 +120,7 @@ public sealed class DiscordGateway
 
     public DiscordGateway(PanelSettings settings, ILogger logger, Func<string, JsonElement, Task> onDispatch)
     {
+        this.settings = settings;
         token = settings.DiscordToken.Trim();
         gatewayUrl = settings.DiscordGatewayUrl;
         this.logger = logger;
@@ -124,7 +149,7 @@ public sealed class DiscordGateway
             catch (Exception exception) when (exception is WebSocketException or IOException or JsonException
                                                   or HttpRequestException or InvalidOperationException)
             {
-                logger.LogWarning("Discord connection lost: {Message}", exception.Message);
+                logger.LogWarning("Discord connection lost: {Message}", DiscordRest.Describe(exception));
             }
             finally
             {
@@ -149,6 +174,8 @@ public sealed class DiscordGateway
     private async Task RunSessionAsync(CancellationToken stop)
     {
         using var socket = new ClientWebSocket();
+        IWebProxy proxy = DiscordRest.ProxyFor(settings);
+        if (proxy != null) socket.Options.Proxy = proxy;
         bool resuming = sessionId != null && resumeUrl != null;
         await socket.ConnectAsync(new Uri(resuming ? resumeUrl : gatewayUrl), stop);
 

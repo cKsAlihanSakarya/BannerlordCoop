@@ -64,8 +64,11 @@ The panel can also run a Discord bot with the same actions as slash commands: `/
 | `DiscordRoleIds` | role IDs whose members may use the commands; empty means nobody |
 | `DiscordChannelId` | channel for notices, empty for none |
 | `DiscordNotifyPlayers` | also post joins and leaves |
+| `DiscordProxy` | proxy for the bot, such as `socks5://127.0.0.1:40000`; empty uses Windows' proxy settings |
 
-Replies are in Turkish. The web page shows whether the bot is connected.
+Replies are in Turkish. The web page shows whether the bot is connected, and `panel.log` next to the exe says why it isn't.
+
+Where Discord is blocked (Turkey, for example), the Discord app may work through a bypass that covers only the app, while the panel gets `The SSL connection could not be established`. Either run a VPN that covers the whole computer, or point `DiscordProxy` at a local proxy, for example Cloudflare WARP in proxy mode (`warp-cli mode proxy`, then `socks5://127.0.0.1:40000`).
 
 ## Manual test
 

@@ -67,7 +67,7 @@ public sealed class DiscordBot : BackgroundService
                                                   && !token.IsCancellationRequested)
             {
                 setupProblem = "unreachable";
-                logger.LogWarning("Discord can't be reached, retrying in 30 s: {Message}", exception.Message);
+                logger.LogWarning("Discord can't be reached, retrying in 30 s: {Message}", DiscordRest.Describe(exception));
                 await Task.Delay(TimeSpan.FromSeconds(30), token);
             }
         }
