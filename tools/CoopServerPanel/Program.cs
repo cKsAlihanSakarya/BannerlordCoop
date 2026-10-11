@@ -193,6 +193,33 @@ api.MapPost("/unstuck", async (UnstuckRequest request, HttpContext context, Serv
     return Results.Json(new { ok, error = code, message });
 });
 
+api.MapPost("/kick", async (KickRequest request, HttpContext context, ServerSupervisor supervisor) =>
+{
+    string name = request?.Name?.Trim();
+    if (request?.Id is not int id || id < 0 || string.IsNullOrEmpty(name) || name.Length > 128 || name.Any(char.IsControl))
+        return Results.Json(new { error = "bad_player" }, statusCode: StatusCodes.Status400BadRequest);
+
+    var (ok, code, message) = await supervisor.KickAsync(UserOf(context), id, name, context.RequestAborted);
+    return Results.Json(new { ok, error = code, message });
+});
+
+api.MapPost("/say", async (SayRequest request, HttpContext context, ServerSupervisor supervisor) =>
+{
+    // One line only: a newline would end the command and type the rest as a second one.
+    string text = new string((request?.Text ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
+    if (text.Length is < 1 or > 200)
+        return Results.Json(new { error = "bad_message" }, statusCode: StatusCodes.Status400BadRequest);
+
+    var (ok, code, message) = await supervisor.SayAsync(UserOf(context), text, context.RequestAborted);
+    return Results.Json(new { ok, error = code, message });
+});
+
+api.MapPost("/save", async (HttpContext context, ServerSupervisor supervisor) =>
+{
+    var (ok, code, message) = await supervisor.SaveAsync(UserOf(context), context.RequestAborted);
+    return Results.Json(new { ok, error = code, message });
+});
+
 app.Logger.LogInformation("Panel listening on {Url}", settings.ListenUrl);
 await app.RunAsync();
 return 0;
@@ -228,6 +255,8 @@ static string ReadEmbeddedPage()
 record LoginRequest(string Name, string Password);
 record DelayRequest(int? Seconds);
 record UnstuckRequest(string Name);
+record KickRequest(int? Id, string Name);
+record SayRequest(string Text);
 
 /// <summary>Five wrong passwords from one address lock it out for ten minutes.</summary>
 sealed class LoginThrottle

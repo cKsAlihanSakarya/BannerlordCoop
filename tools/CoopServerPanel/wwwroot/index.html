@@ -52,6 +52,7 @@ main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
 button, input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 [hidden] { display: none !important; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; color: var(--muted); font-size: 15px; }
 .topbar .who { margin-right: auto; }
@@ -111,7 +112,11 @@ h2 { font: 600 22px/1.3 var(--serif); margin: 0 0 12px; }
 .roster .meta { color: var(--muted); font-size: 15px; grid-column: 1; }
 .roster .meta .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: 1px; }
 .roster .online .dot { background: var(--green); }
-.roster .btn { grid-row: 1 / span 2; grid-column: 2; }
+.roster .row-actions { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 8px; }
+.btn.quiet { color: var(--muted); }
+.say { display: flex; gap: 8px; flex-wrap: wrap; }
+.say input { flex: 1 1 240px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-height: 44px; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
 .empty { color: var(--muted); margin: 0; }
 
 .activity { list-style: none; margin: 0; padding: 0; font-size: 15px; }
@@ -201,7 +206,10 @@ dialog .actions { justify-content: flex-end; margin: 0; }
         <select id="warn"></select>
       </label>
     </div>
-    <button type="button" class="link" id="btn-kill" data-t="force_stop"></button>
+    <div class="tools">
+      <button class="btn small" type="button" id="btn-save" data-t="save_now"></button>
+      <button type="button" class="link" id="btn-kill" data-t="force_stop"></button>
+    </div>
 
     <div class="progress" id="progress" hidden>
       <p id="progress-text" aria-live="polite"></p>
@@ -212,6 +220,15 @@ dialog .actions { justify-content: flex-end; margin: 0; }
       <h2 id="players-heading"></h2>
       <ul class="roster" id="roster"></ul>
       <p class="empty" id="roster-empty"></p>
+    </section>
+
+    <section aria-labelledby="say-heading" id="say-section">
+      <h2 id="say-heading" data-t="announce"></h2>
+      <form class="say" id="say-form">
+        <label for="say-text" class="visually-hidden" data-t="announce_label"></label>
+        <input id="say-text" maxlength="200" autocomplete="off">
+        <button class="btn" type="submit" id="say-send" data-t="send"></button>
+      </form>
     </section>
 
     <section aria-labelledby="activity-heading">
@@ -282,6 +299,13 @@ const STRINGS = {
     a_crash_detected: "Sunucu beklenmedik şekilde kapandı (çıkış kodu {0})",
     a_crash_giveup: "15 dakikada 3 kez çöktü, otomatik başlatma durduruldu",
     a_crash_restart_skipped: "Otomatik başlatma atlandı, başka bir işlem sürüyordu",
+    kick: "At (kick)", confirm_kick_title: "{0} sunucudan atılsın mı?", confirm_kick_text: "Oyuncunun bağlantısı kesilir. İstediği zaman tekrar girebilir.",
+    kick_done: "{0} sunucudan atıldı.", kick_refused: "Sunucu atmayı reddetti.",
+    save_now: "Şimdi kaydet", saving_now: "Kaydediliyor…", save_done: "Dünya kaydedildi.", save_refused: "Kayıt başarısız.",
+    announce: "Duyuru", announce_label: "Tüm oyunculara gidecek mesaj", send: "Gönder", say_done: "Duyuru gönderildi.",
+    say_refused: "Duyuru gönderilemedi.", bad_message: "Mesaj 1 ile 200 karakter arasında olmalı.",
+    a_kick_ok: "{0} oyuncusunu attı", a_kick_failed: "atma başarısız: {0}", a_save_ok: "dünyayı kaydetti", a_save_failed: "kayıt başarısız: {0}",
+    a_say_ok: "duyuru gönderdi: {0}", a_say_failed: "duyuru gönderilemedi: {0}",
     state_stopping: "Sunucu kapanıyor", fact_stopping: "Oyun kaydediliyor ve sunucu kapanıyor.",
     problem_silent: "Sunucu bir buçuk dakikadır log yazmıyor, donmuş olabilir. Birkaç dakikada düzelmezse zorla kapat.",
     problem_stuck_loading: "Sunucu 10 dakikadır açılıyor. Takıldıysa zorla kapatıp tekrar başlat.",
@@ -337,6 +361,13 @@ const STRINGS = {
     a_crash_detected: "Server closed unexpectedly (exit code {0})",
     a_crash_giveup: "Crashed 3 times in 15 minutes; automatic start is paused",
     a_crash_restart_skipped: "Automatic start skipped; another action was running",
+    kick: "Kick", confirm_kick_title: "Kick {0} from the server?", confirm_kick_text: "The player is disconnected and can join again at any time.",
+    kick_done: "Kicked {0}.", kick_refused: "The server refused the kick.",
+    save_now: "Save now", saving_now: "Saving…", save_done: "World saved.", save_refused: "Saving failed.",
+    announce: "Announcement", announce_label: "Message to every player", send: "Send", say_done: "Announcement sent.",
+    say_refused: "The announcement wasn't sent.", bad_message: "The message must be 1 to 200 characters.",
+    a_kick_ok: "kicked {0}", a_kick_failed: "kick failed: {0}", a_save_ok: "saved the world", a_save_failed: "save failed: {0}",
+    a_say_ok: "announced: {0}", a_say_failed: "announcement failed: {0}",
     state_stopping: "Server is stopping", fact_stopping: "Saving the game and shutting down.",
     problem_silent: "The server hasn't written to its log for 90 seconds and may be frozen. Force stop it if this lasts.",
     problem_stuck_loading: "The server has been starting for 10 minutes. If it's stuck, force stop and start it again.",
@@ -394,6 +425,7 @@ function formatSeconds(seconds) {
 function applyStaticText() {
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t(el.dataset.t); });
+  $("say-text").placeholder = t("announce_label");
   document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
   const select = $("warn");
   const current = select.value;
@@ -505,6 +537,11 @@ function render() {
   $("btn-stop").hidden = !running;
   $("warn-wrap").hidden = !running;
   $("btn-restart").disabled = $("btn-stop").disabled = opRunning;
+  $("btn-save").hidden = !running;
+  $("btn-save").disabled = opRunning || saving;
+  $("btn-save").textContent = saving ? t("saving_now") : t("save_now");
+  $("say-section").hidden = !running;
+  $("say-send").disabled = sayBusy;
   $("btn-kill").hidden = !["notResponding", "starting", "running", "stopping"].includes(shown) || launching;
   $("btn-kill").disabled = opRunning && op.name === "kill";
   if (warnChosen === null) { warnChosen = String(s.warningSeconds); $("warn").value = warnChosen; }
@@ -546,6 +583,8 @@ function renderPlayer(p, canAct) {
   dot.className = "dot";
   meta.append(dot, document.createTextNode(t("pstate_" + p.state) !== "pstate_" + p.state ? t("pstate_" + p.state) : p.state));
   li.append(name, meta);
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
   if (!joining) {
     const button = document.createElement("button");
     button.type = "button";
@@ -554,8 +593,16 @@ function renderPlayer(p, canAct) {
     button.textContent = busy ? t("unstucking") : t("unstuck");
     button.disabled = !canAct || busy;
     button.addEventListener("click", () => unstuck(p, button));
-    li.append(button);
+    actions.append(button);
   }
+  const kick = document.createElement("button");
+  kick.type = "button";
+  kick.className = "btn small quiet";
+  kick.textContent = t("kick");
+  kick.disabled = !canAct;
+  kick.addEventListener("click", () => kickPlayer(p, kick));
+  actions.append(kick);
+  li.append(actions);
   return li;
 }
 
@@ -613,6 +660,52 @@ async function unstuck(player, button) {
     refresh();
   }
 }
+
+let saving = false;
+let sayBusy = false;
+
+async function kickPlayer(player, button) {
+  const label = player.name === "(joining)" ? t("joining") : player.name;
+  if (!(await confirmAction(t("confirm_kick_title", label), t("confirm_kick_text"), t("kick")))) return;
+  button.disabled = true;
+  const { status: code, data } = await api("/api/kick", { id: player.id, name: label });
+  if (code === 401) { showSignIn(); return; }
+  if (data && data.ok) showToast(t("kick_done", label));
+  else showToast(failureText(data), true);
+  refresh();
+}
+
+$("btn-save").addEventListener("click", async () => {
+  saving = true;
+  render();
+  try {
+    const { status: code, data } = await api("/api/save", {});
+    if (code === 401) { showSignIn(); return; }
+    if (data && data.ok) showToast(t("save_done"));
+    else showToast(failureText(data), true);
+  } finally {
+    saving = false;
+    refresh();
+  }
+});
+
+$("say-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = $("say-text");
+  const text = input.value.trim();
+  if (!text) { input.focus(); return; }
+  sayBusy = true;
+  render();
+  try {
+    const { status: code, data } = await api("/api/say", { text });
+    if (code === 401) { showSignIn(); return; }
+    if (data && data.ok) { showToast(t("say_done")); input.value = ""; }
+    else showToast(failureText(data), true);
+  } finally {
+    sayBusy = false;
+    refresh();
+  }
+});
 
 $("signin-form").addEventListener("submit", async (event) => {
   event.preventDefault();

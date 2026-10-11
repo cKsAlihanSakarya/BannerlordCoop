@@ -5,7 +5,7 @@ A small web panel for the official dedicated server (`DedicatedServer\Bannerlord
 Nothing in the mod or the server changes. The panel does what the host would do by hand:
 
 - It starts `BannerlordCoopServer.exe` in its own window, the same as a double-click.
-- It types commands into that window: `coop.debug.players.list`, `coop.unstuck <controller id>`, `coop.server.shutdown <seconds>`, `stop`.
+- It types commands into that window: `coop.debug.players.list`, `coop.unstuck <controller id>`, `coop.server.shutdown <seconds>`, `stop`, and the server's own `kick <id>`, `say <text>` and `save`.
 - It reads the server's answers, its phase and its player list from `logs\coop-server-*.log` in the server's data folder. That folder is `Documents\Mount and Blade II Bannerlord\CoopData\DedicatedServer` by default. The server writes `@DS@{"ev":"state",...}` and `@DS@{"ev":"players",...}` lines there.
 
 A stop with a warning runs `coop.server.shutdown <seconds>` first, which warns players, closes joins, disconnects everyone and saves. It then runs `stop`, which saves again and exits. When nobody is connected, or the warning is 0, it runs `stop` right away. If the server exits on its own after it was serving, the panel starts it again, at most 3 times in 15 minutes. An exit code of 0 counts as a stop from the server window and isn't restarted.

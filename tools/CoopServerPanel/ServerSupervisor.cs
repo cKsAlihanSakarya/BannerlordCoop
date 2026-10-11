@@ -216,6 +216,76 @@ public sealed class ServerSupervisor : BackgroundService
         }
     }
 
+    /// <summary>Disconnects a player with the server's kick, by the id its player list shows.</summary>
+    public async Task<(bool Ok, string Code, string Message)> KickAsync(string user, int playerId, string playerName,
+        CancellationToken token)
+    {
+        try
+        {
+            IReadOnlyList<string> answer = await RunCommandAsync(
+                $"kick {playerId.ToString(CultureInfo.InvariantCulture)}", token);
+            bool ok = !answer.Any(LooksLikeRefusal);
+            string message = Summarize(answer);
+            activity.Add(user, ok ? "kick_ok" : "kick_failed", ok ? playerName : $"{playerName}: {message}",
+                ok ? ActivityKind.Success : ActivityKind.Error);
+            return (ok, ok ? null : "kick_refused", message);
+        }
+        catch (OperationFailedException failure)
+        {
+            activity.Add(user, "kick_failed", $"{playerName}: {failure.Code}", ActivityKind.Error);
+            return (false, failure.Code, failure.Detail);
+        }
+    }
+
+    /// <summary>Broadcasts a message to every player with the server's say.</summary>
+    public async Task<(bool Ok, string Code, string Message)> SayAsync(string user, string text, CancellationToken token)
+    {
+        try
+        {
+            IReadOnlyList<string> answer = await RunCommandAsync($"say {text}", token);
+            bool ok = !answer.Any(LooksLikeRefusal);
+            activity.Add(user, ok ? "say_ok" : "say_failed", ok ? text : Summarize(answer),
+                ok ? ActivityKind.Success : ActivityKind.Error);
+            return (ok, ok ? null : "say_refused", Summarize(answer));
+        }
+        catch (OperationFailedException failure)
+        {
+            activity.Add(user, "say_failed", failure.Code, ActivityKind.Error);
+            return (false, failure.Code, failure.Detail);
+        }
+    }
+
+    /// <summary>Writes the world save now with the server's save, waiting for it to report back.</summary>
+    public async Task<(bool Ok, string Code, string Message)> SaveAsync(string user, CancellationToken token)
+    {
+        try
+        {
+            IReadOnlyList<string> answer = await RunCommandAsync("save", token,
+                line => line.Contains("saved", StringComparison.OrdinalIgnoreCase) ||
+                        line.Contains("fail", StringComparison.OrdinalIgnoreCase),
+                TimeSpan.FromSeconds(60));
+            bool ok = answer.Any(line => line.Contains("saved", StringComparison.OrdinalIgnoreCase)) &&
+                      !answer.Any(line => line.Contains("fail", StringComparison.OrdinalIgnoreCase));
+            string message = Summarize(answer);
+            activity.Add(user, ok ? "save_ok" : "save_failed", ok ? null : message,
+                ok ? ActivityKind.Success : ActivityKind.Error);
+            return (ok, ok ? null : "save_refused", message);
+        }
+        catch (OperationFailedException failure)
+        {
+            activity.Add(user, "save_failed", failure.Code, ActivityKind.Error);
+            return (false, failure.Code, failure.Detail);
+        }
+    }
+
+    /// <summary>Wording the server uses when it turns a command down.</summary>
+    private static bool LooksLikeRefusal(string line) =>
+        line.Contains("unknown", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("no player", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("usage", StringComparison.OrdinalIgnoreCase) ||
+        line.Contains("failed", StringComparison.OrdinalIgnoreCase);
+
     public async Task<(bool Ok, string Code, string Message)> CancelShutdownAsync(string user, CancellationToken token)
     {
         try
@@ -326,7 +396,8 @@ public sealed class ServerSupervisor : BackgroundService
     /// Types <paramref name="command"/> into the server window and returns what it printed in reply:
     /// the lines after its "&gt; command" echo, without the server's periodic noise.
     /// </summary>
-    private async Task<IReadOnlyList<string>> RunCommandAsync(string command, CancellationToken token)
+    private async Task<IReadOnlyList<string>> RunCommandAsync(string command, CancellationToken token,
+        Func<string, bool> until = null, TimeSpan? untilTimeout = null)
     {
         await typing.WaitAsync(token);
         try
@@ -362,10 +433,12 @@ public sealed class ServerSupervisor : BackgroundService
             if (echoIndex < 0) throw new OperationFailedException("no_echo");
 
             // The answer is printed right after the echo; stop once the log has been quiet briefly.
-            DateTimeOffset answerDeadline = DateTimeOffset.Now + AnswerWindow;
+            // A slow command (save) names the line that ends its answer instead.
+            DateTimeOffset answerDeadline = DateTimeOffset.Now + (until == null ? AnswerWindow : untilTimeout ?? AnswerWindow);
             DateTimeOffset lastGrowth = DateTimeOffset.Now;
             int count = seen.Count;
-            while (DateTimeOffset.Now < answerDeadline && DateTimeOffset.Now - lastGrowth < AnswerQuiet)
+            while (DateTimeOffset.Now < answerDeadline &&
+                   (until != null || DateTimeOffset.Now - lastGrowth < AnswerQuiet))
             {
                 await Task.Delay(100, token);
                 log.Poll();
@@ -375,6 +448,7 @@ public sealed class ServerSupervisor : BackgroundService
                     count = seen.Count;
                     lastGrowth = DateTimeOffset.Now;
                 }
+                if (until != null && seen.Skip(IndexOfEcho(seen, echo) + 1).Any(until)) break;
             }
             echoIndex = IndexOfEcho(seen, echo);
 
