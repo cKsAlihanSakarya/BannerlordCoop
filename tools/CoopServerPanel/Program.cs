@@ -1,0 +1,246 @@
+﻿using CoopServerPanel;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using System.Collections.Concurrent;
+using System.Reflection;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+string settingsPath = args.Length > 0 ? Path.GetFullPath(args[0]) : PanelSettings.DefaultPath;
+PanelSettings settings;
+try
+{
+    settings = PanelSettings.LoadOrCreate(settingsPath, out bool created, out bool passwordGenerated);
+    if (passwordGenerated)
+    {
+        Console.WriteLine($"Panel password: {settings.PanelPassword}  (saved in {settingsPath})");
+    }
+    if (created)
+    {
+        Console.WriteLine($"Created {settingsPath}. Set BannerlordExe and SaveName there, then start the panel again.");
+        return 0;
+    }
+}
+catch (Exception exception) when (exception is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+{
+    Console.Error.WriteLine($"Could not read {settingsPath}: {exception.Message}");
+    return 1;
+}
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = Array.Empty<string>(),
+    ContentRootPath = AppContext.BaseDirectory,
+});
+builder.WebHost.UseUrls(settings.ListenUrl);
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.SingleLine = true;
+    options.TimestampFormat = "HH:mm:ss ";
+});
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+// Keys live in the user profile; the unencrypted-at-rest notice is expected for a local tool.
+builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Error);
+
+builder.Services.AddSingleton(settings);
+builder.Services.AddSingleton(new AdminPipeClient(settings.GamePort));
+builder.Services.AddSingleton<ActivityLog>();
+builder.Services.AddSingleton<ServerSupervisor>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<ServerSupervisor>());
+builder.Services.AddSingleton<LoginThrottle>();
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "coop_panel";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.ExpireTimeSpan = TimeSpan.FromDays(14);
+        options.SlidingExpiration = true;
+        // The page handles a 401 itself; never redirect API calls to a login URL.
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    });
+builder.Services.AddAuthorization();
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+});
+
+var app = builder.Build();
+
+app.Use(async (context, next) =>
+{
+    // State-changing calls must carry a header a cross-site form cannot set.
+    if (HttpMethods.IsPost(context.Request.Method) &&
+        context.Request.Headers["X-Coop-Panel"] != "1")
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    await next();
+});
+app.UseAuthentication();
+app.UseAuthorization();
+
+string page = ReadEmbeddedPage();
+app.MapGet("/", () => Results.Content(page, "text/html; charset=utf-8"));
+
+app.MapPost("/api/login", async (LoginRequest request, HttpContext context, LoginThrottle throttle, ActivityLog log) =>
+{
+    string address = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    if (!throttle.IsAllowed(address))
+        return Results.Json(new { error = "too_many_attempts" }, statusCode: StatusCodes.Status429TooManyRequests);
+
+    string name = (request?.Name ?? "").Trim();
+    if (name.Length is < 1 or > 24)
+        return Results.Json(new { error = "name_required" }, statusCode: StatusCodes.Status400BadRequest);
+
+    if (!PasswordMatches(request.Password ?? "", settings.PanelPassword))
+    {
+        throttle.RecordFailure(address);
+        return Results.Json(new { error = "wrong_password" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    throttle.Reset(address);
+    var identity = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, name) },
+        CookieAuthenticationDefaults.AuthenticationScheme);
+    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity),
+        new AuthenticationProperties { IsPersistent = true });
+    log.Add(name, "signed_in");
+    return Results.Json(new { name });
+});
+
+app.MapPost("/api/logout", async (HttpContext context) =>
+{
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.NoContent();
+});
+
+var api = app.MapGroup("/api").RequireAuthorization();
+
+api.MapGet("/status", (HttpContext context, ServerSupervisor supervisor, ActivityLog log) =>
+{
+    ServerSnapshot snapshot = supervisor.Snapshot;
+    return Results.Json(new
+    {
+        user = context.User.Identity?.Name,
+        state = snapshot.State,
+        problem = snapshot.Problem,
+        checkedAt = snapshot.CheckedAt,
+        server = snapshot.Server,
+        operation = supervisor.Operation,
+        nextSave = supervisor.NextSave,
+        warningSeconds = settings.WarningSeconds,
+        activity = log.Recent(30),
+    });
+});
+
+api.MapPost("/start", (HttpContext context, ServerSupervisor supervisor) =>
+    Accepted(supervisor.TryStart(UserOf(context), out var error), error));
+
+api.MapPost("/stop", (DelayRequest request, HttpContext context, ServerSupervisor supervisor) =>
+    ValidSeconds(request, out int seconds)
+        ? Accepted(supervisor.TryStop(UserOf(context), seconds, out var error), error)
+        : Results.Json(new { error = "bad_seconds" }, statusCode: StatusCodes.Status400BadRequest));
+
+api.MapPost("/restart", (DelayRequest request, HttpContext context, ServerSupervisor supervisor) =>
+    ValidSeconds(request, out int seconds)
+        ? Accepted(supervisor.TryRestart(UserOf(context), seconds, out var error), error)
+        : Results.Json(new { error = "bad_seconds" }, statusCode: StatusCodes.Status400BadRequest));
+
+api.MapPost("/kill", (HttpContext context, ServerSupervisor supervisor) =>
+    Accepted(supervisor.TryForceStop(UserOf(context), out var error), error));
+
+api.MapPost("/cancel", async (HttpContext context, ServerSupervisor supervisor) =>
+{
+    var (ok, message) = await supervisor.CancelShutdownAsync(UserOf(context), context.RequestAborted);
+    return Results.Json(new { ok, message });
+});
+
+api.MapPost("/unstuck", async (UnstuckRequest request, HttpContext context, ServerSupervisor supervisor) =>
+{
+    string controllerId = request?.ControllerId?.Trim();
+    if (string.IsNullOrEmpty(controllerId) || controllerId.Length > 128 || controllerId.Any(char.IsControl))
+        return Results.Json(new { error = "bad_player" }, statusCode: StatusCodes.Status400BadRequest);
+
+    var (ok, message) = await supervisor.UnstuckAsync(UserOf(context), controllerId, context.RequestAborted);
+    return Results.Json(new { ok, message });
+});
+
+app.Logger.LogInformation("Panel listening on {Url}", settings.ListenUrl);
+await app.RunAsync();
+return 0;
+
+static string UserOf(HttpContext context) => context.User.Identity?.Name ?? "?";
+
+static IResult Accepted(bool started, string error) => started
+    ? Results.Json(new { ok = true }, statusCode: StatusCodes.Status202Accepted)
+    : Results.Json(new { error }, statusCode: StatusCodes.Status409Conflict);
+
+static bool ValidSeconds(DelayRequest request, out int seconds)
+{
+    seconds = request?.Seconds ?? -1;
+    return seconds is >= 0 and <= 3600;
+}
+
+static bool PasswordMatches(string given, string expected)
+{
+    // Hashing first makes the comparison length-independent as well as constant-time.
+    byte[] a = SHA256.HashData(Encoding.UTF8.GetBytes(given));
+    byte[] b = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
+    return CryptographicOperations.FixedTimeEquals(a, b);
+}
+
+static string ReadEmbeddedPage()
+{
+    using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("index.html")
+        ?? throw new InvalidOperationException("The panel page is missing from the build.");
+    using var reader = new StreamReader(stream, Encoding.UTF8);
+    return reader.ReadToEnd();
+}
+
+record LoginRequest(string Name, string Password);
+record DelayRequest(int? Seconds);
+record UnstuckRequest(string ControllerId);
+
+/// <summary>Five wrong passwords from one address lock it out for ten minutes.</summary>
+sealed class LoginThrottle
+{
+    private const int MaxFailures = 5;
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(10);
+    private readonly ConcurrentDictionary<string, (int Count, DateTimeOffset First)> failures = new();
+
+    public bool IsAllowed(string address)
+    {
+        if (!failures.TryGetValue(address, out var entry)) return true;
+        if (DateTimeOffset.Now - entry.First > Window)
+        {
+            failures.TryRemove(address, out _);
+            return true;
+        }
+        return entry.Count < MaxFailures;
+    }
+
+    public void RecordFailure(string address) =>
+        failures.AddOrUpdate(address, _ => (1, DateTimeOffset.Now),
+            (_, entry) => DateTimeOffset.Now - entry.First > Window ? (1, DateTimeOffset.Now) : (entry.Count + 1, entry.First));
+
+    public void Reset(string address) => failures.TryRemove(address, out _);
+}

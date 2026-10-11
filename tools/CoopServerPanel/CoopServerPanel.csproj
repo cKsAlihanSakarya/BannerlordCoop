@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>CoopServerPanel</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The page is embedded so a single-file publish needs no wwwroot folder beside the exe. -->
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot/index.html" LogicalName="index.html" />
+    <!-- Shares the pipe name and request format with the server side. -->
+    <Compile Include="../../source/Coop.Core/Server/Services/Admin/ServerAdminProtocol.cs" Link="Protocol/ServerAdminProtocol.cs" />
+  </ItemGroup>
+</Project>

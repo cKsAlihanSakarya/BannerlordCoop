@@ -16,6 +16,7 @@ using Coop.Core.Common.Commands;
 using Coop.Core.Common.Session;
 using Coop.Core.Server.Connections;
 using Coop.Core.Server.Policies;
+using Coop.Core.Server.Services.Admin;
 using Coop.Core.Server.Services.Instances;
 using Coop.Core.Server.Services.Kingdoms;
 using Coop.Core.Server.Services.MobileParties;
@@ -104,6 +105,11 @@ public class ServerModule : CommonModule
             .InstancePerLifetimeScope()
             .AutoActivate();
         builder.RegisterType<ServerShutdownCommand.ShutdownCoopCommand>().As<ICoopCommand>().InstancePerDependency();
+
+        // Local admin pipe for tools/CoopServerPanel. AutoActivate so it listens from server start
+        // and closes with the session scope.
+        builder.RegisterType<ServerAdminRequestHandler>().As<IServerAdminRequestHandler>().InstancePerLifetimeScope();
+        builder.RegisterType<ServerAdminPipeHost>().As<IServerAdminPipeHost>().InstancePerLifetimeScope().AutoActivate();
 
         // Pauses time while a peer's packet queue is overloaded (slow client catching up). Constructed
         // as a CoopServer dependency, so it registers its unpause policy when the server is built.

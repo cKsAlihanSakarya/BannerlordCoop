@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coop Server Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Spectral:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #18212c;
+  --surface: #212c39;
+  --line: #34424f;
+  --text: #ece6d8;
+  --muted: #9aa6b2;
+  --gold: #c9a646;
+  --gold-ink: #241d08;
+  --red: #c0574e;
+  --green: #79a862;
+  --amber: #d4913f;
+  --focus: #e8c96a;
+  --serif: "Spectral", Georgia, "Times New Roman", serif;
+  --sans: "Barlow", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --ink: #eef0ee;
+    --surface: #ffffff;
+    --line: #d3d8d6;
+    --text: #1d2731;
+    --muted: #5b6874;
+    --gold: #8f6f14;
+    --gold-ink: #ffffff;
+    --red: #a63b33;
+    --green: #3f7a2d;
+    --amber: #a8641b;
+    --focus: #8f6f14;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--ink);
+  color: var(--text);
+  font: 400 17px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.topbar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; color: var(--muted); font-size: 15px; }
+.topbar .who { margin-right: auto; }
+.link { background: none; border: 0; padding: 4px 2px; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.link:hover { color: var(--text); }
+.lang button { background: none; border: 0; padding: 4px 6px; color: var(--muted); cursor: pointer; }
+.lang button[aria-pressed="true"] { color: var(--text); font-weight: 600; }
+
+/* The banner and the state sentence are the one loud thing on the page. */
+.hero { display: grid; grid-template-columns: 64px 1fr; gap: 20px; align-items: start; margin: 28px 0 28px; }
+.pennant { width: 64px; height: 112px; transform-origin: 50% 0; }
+/* Unscoped: rules for <use> content match against the symbol's own tree, not the .pennant host. */
+.cloth { fill: var(--state-color, var(--muted)); transition: fill .4s ease; }
+.pole { stroke: var(--muted); }
+.emblem { fill: none; stroke: var(--ink); stroke-width: 3; opacity: .55; }
+.pennant.sway { animation: sway 2.4s ease-in-out infinite; }
+@keyframes sway { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2.5deg); } }
+@media (prefers-reduced-motion: reduce) { .pennant.sway { animation: none; } .cloth { transition: none; } }
+
+h1 { font: 600 clamp(32px, 6vw, 44px)/1.1 var(--serif); margin: 6px 0 10px; letter-spacing: -.01em; }
+.facts { margin: 0; color: var(--muted); }
+.facts p { margin: 0; }
+.facts strong { color: var(--text); font-weight: 500; }
+
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 12px; }
+.btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; min-height: 44px;
+}
+.btn:hover:not(:disabled) { border-color: var(--muted); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }
+.btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+.btn.small { padding: 6px 12px; min-height: 36px; font-size: 15px; }
+.warn-select { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 15px; }
+.warn-select select { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-height: 44px; }
+
+.progress {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  border-left: 3px solid var(--amber); padding: 10px 14px; margin: 16px 0 8px;
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+.progress.failed { border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.progress.done { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.progress p { margin: 0; flex: 1 1 240px; }
+
+.notice { color: var(--muted); font-size: 15px; margin: 8px 0 0; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(92vw, 560px);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; box-shadow: 0 6px 24px rgba(0,0,0,.25); white-space: pre-line; }
+.toast.error { border-color: var(--red); }
+
+section { margin-top: 40px; }
+h2 { font: 600 22px/1.3 var(--serif); margin: 0 0 12px; }
+.roster { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.roster li { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.roster .hero-name { font: 500 19px/1.3 var(--serif); }
+.roster .meta { color: var(--muted); font-size: 15px; grid-column: 1; }
+.roster .meta .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: 1px; }
+.roster .online .dot { background: var(--green); }
+.roster .btn { grid-row: 1 / span 2; grid-column: 2; }
+.empty { color: var(--muted); margin: 0; }
+
+.activity { list-style: none; margin: 0; padding: 0; font-size: 15px; }
+.activity li { display: grid; grid-template-columns: 52px 1fr; gap: 12px; padding: 6px 0; }
+.activity time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.activity .error { color: var(--red); }
+.activity .who { font-weight: 600; }
+
+/* Sign in */
+.signin { max-width: 380px; margin: 10vh auto 0; }
+.signin .hero { margin-top: 0; }
+.field { display: grid; gap: 6px; margin-bottom: 16px; }
+.field label { font-weight: 500; }
+.field input { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-height: 44px; }
+.error-text { color: var(--red); min-height: 1.5em; margin: 0 0 12px; }
+
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 24px; max-width: min(92vw, 460px); }
+dialog::backdrop { background: rgba(10, 14, 20, .6); }
+dialog h2 { margin-bottom: 8px; }
+dialog p { margin: 0 0 20px; color: var(--muted); }
+dialog .actions { justify-content: flex-end; margin: 0; }
+
+@media (max-width: 520px) {
+  .hero { grid-template-columns: 44px 1fr; gap: 14px; }
+  .pennant { width: 44px; height: 78px; }
+  .actions .btn { flex: 1 1 auto; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="pennant" viewBox="0 0 64 112">
+    <line class="pole" x1="4" y1="4" x2="60" y2="4" stroke-width="4" stroke-linecap="round"/>
+    <path class="cloth" d="M10 6 H54 V104 L32 86 L10 104 Z"/>
+    <path class="emblem" d="M32 30 L44 42 L32 54 L20 42 Z"/>
+  </symbol>
+</svg>
+
+<main>
+  <div class="topbar">
+    <span class="who" id="who"></span>
+    <span class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="tr">TR</button><button type="button" data-lang="en">EN</button>
+    </span>
+    <button type="button" class="link" id="logout" hidden data-t="sign_out"></button>
+  </div>
+
+  <!-- Sign in -->
+  <div id="signin" class="signin" hidden>
+    <div class="hero">
+      <svg class="pennant" style="--state-color: var(--gold)" aria-hidden="true"><use href="#pennant"/></svg>
+      <div>
+        <h1 data-t="signin_title"></h1>
+        <div class="facts"><p data-t="signin_lead"></p></div>
+      </div>
+    </div>
+    <form id="signin-form" novalidate>
+      <div class="field">
+        <label for="name" data-t="your_name"></label>
+        <input id="name" name="name" autocomplete="nickname" maxlength="24" required>
+      </div>
+      <div class="field">
+        <label for="password" data-t="password"></label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <p class="error-text" id="signin-error" role="alert"></p>
+      <button class="btn primary" type="submit" data-t="sign_in"></button>
+    </form>
+  </div>
+
+  <!-- Panel -->
+  <div id="panel" hidden>
+    <div class="hero">
+      <svg class="pennant" id="state-pennant" aria-hidden="true"><use href="#pennant"/></svg>
+      <div>
+        <h1 id="state-title" aria-live="polite"></h1>
+        <div class="facts" id="facts"></div>
+      </div>
+    </div>
+
+    <div class="actions" id="actions">
+      <button class="btn primary" type="button" id="btn-start" data-t="start"></button>
+      <button class="btn primary" type="button" id="btn-restart" data-t="restart"></button>
+      <button class="btn danger" type="button" id="btn-stop" data-t="stop"></button>
+      <label class="warn-select" id="warn-wrap">
+        <span data-t="warning"></span>
+        <select id="warn"></select>
+      </label>
+    </div>
+    <button type="button" class="link" id="btn-kill" data-t="force_stop"></button>
+
+    <div class="progress" id="progress" hidden>
+      <p id="progress-text" aria-live="polite"></p>
+      <button class="btn small" type="button" id="btn-cancel" data-t="cancel_shutdown" hidden></button>
+    </div>
+
+    <section aria-labelledby="players-heading">
+      <h2 id="players-heading"></h2>
+      <ul class="roster" id="roster"></ul>
+      <p class="empty" id="roster-empty"></p>
+    </section>
+
+    <section aria-labelledby="activity-heading">
+      <h2 id="activity-heading" data-t="activity"></h2>
+      <ul class="activity" id="activity"></ul>
+    </section>
+  </div>
+</main>
+
+<dialog id="confirm">
+  <form method="dialog">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <div class="actions">
+      <button class="btn" value="cancel" data-t="back"></button>
+      <button class="btn primary" value="ok" id="confirm-ok"></button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+"use strict";
+
+const STRINGS = {
+  tr: {
+    sign_out: "Çıkış yap", signin_title: "Sunucu paneli", signin_lead: "Arkadaşının verdiği panel şifresiyle gir. Adın, kimin ne yaptığını gösteren listede görünür.",
+    your_name: "Adın", password: "Panel şifresi", sign_in: "Giriş yap",
+    name_required: "Adını yaz.", wrong_password: "Şifre yanlış.", too_many_attempts: "Çok fazla yanlış deneme. 10 dakika sonra tekrar dene.", network: "Panele ulaşılamadı.",
+    signed_in_as: "{0} olarak girdin",
+    start: "Sunucuyu başlat", restart: "Yeniden başlat", stop: "Kapat", force_stop: "Zorla kapat", warning: "Uyarı süresi",
+    cancel_shutdown: "Kapatmayı iptal et", back: "Vazgeç", activity: "Son işlemler",
+    s_0: "Hemen", s_sec: "{0} sn", s_min: "{0} dk",
+    state_running: "Sunucu açık", state_starting: "Sunucu açılıyor", state_stopped: "Sunucu kapalı", state_notResponding: "Sunucu yanıt vermiyor",
+    fact_save: "Kayıt: {0}", fact_next_save: "Açılınca yüklenecek kayıt: {0}", fact_no_save: "Yüklenecek kayıt seçilmemiş. panelsettings.json içinde SaveName'i doldur.",
+    fact_online: "{0} oyuncu bağlı", fact_loading: "Kayıt yükleniyor, bu birkaç dakika sürebilir.",
+    fact_not_responding: "Yükleme ya da kayıt sürüyorsa biraz bekle. Uzun süre böyle kalırsa zorla kapat.",
+    players: "Oyuncular", players_n: "Oyuncular ({0})", no_players: "Henüz kimse bağlanmadı.", players_offline_server: "Sunucu açılınca oyuncular burada görünür.",
+    online: "Bağlı", offline: "Bağlı değil", unstuck: "Kurtar (unstuck)",
+    confirm_stop_title: "Sunucu kapatılsın mı?", confirm_restart_title: "Sunucu yeniden başlatılsın mı?",
+    confirm_stop_text: "Oyuncular uyarılır, {0} sonra herkes çıkarılır ve oyun kaydedilir.",
+    confirm_now: "Oyuncular hemen çıkarılır ve oyun kaydedilir.",
+    confirm_kill_title: "Zorla kapatılsın mı?",
+    confirm_kill_text: "Sunucu kayıt yapmadan kapanır. Son kayıttan sonraki ilerleme kaybolur. Sadece sunucu takıldıysa kullan.",
+    unstuck_done: "{0} kurtarıldı.", busy: "Başka bir işlem sürüyor.", bad_seconds: "Uyarı süresi geçersiz.",
+    panel: "Panel", just_now: "şimdi",
+    // operation progress
+    start_requested: "Sunucu başlatılıyor", starting: "Kayıt yükleniyor: {0}", started: "Sunucu açıldı",
+    stop_requested: "Kapatma isteği gönderildi", restart_requested: "Yeniden başlatma isteği gönderildi", kill_requested: "Sunucu zorla kapatılıyor",
+    countdown: "Oyuncular uyarıldı, {0} sn sonra kapanacak", countdown_nosec: "Oyuncular uyarıldı",
+    draining: "Oyuncular çıkarılıyor", saving: "Oyun kaydediliyor", closing: "Sunucu kapanıyor", stopped: "Kaydedildi ve kapatıldı", killed: "Sunucu zorla kapatıldı",
+    // failures
+    already_running: "Sunucu zaten açık.", no_save: "Hangi kaydın yükleneceği bilinmiyor. panelsettings.json içinde SaveName'i doldur.",
+    exe_missing: "Bannerlord.exe bulunamadı: {0}", start_failed: "Sunucu başlatılamadı: {0}",
+    start_exited: "Sunucu açılırken kapandı (çıkış kodu {0}). Coop_server.log dosyasına bak.",
+    start_timeout: "Sunucu 10 dakikada yanıt vermedi. Sunucuda panel destekli Coop sürümü kurulu mu?",
+    not_responding: "Sunucu yanıt vermiyor. Takıldıysa zorla kapat.", shutdown_refused: "Sunucu kapatmayı reddetti: {0}",
+    shutdown_timeout: "Kapatma beklenenden uzun sürdü. Sunucunun durumunu kontrol et.",
+    save_failed: "Kayıt başarısız oldu, sunucu açık bırakıldı: {0}", stop_cancelled: "Kapatma iptal edildi.",
+    not_running: "Çalışan sunucu yok.", kill_failed: "Sunucu işlemi sonlandırılamadı.", unexpected_error: "Beklenmeyen hata: {0}",
+    // activity
+    a_signed_in: "panele girdi", a_start_requested: "sunucuyu başlattı ({0})", a_started: "Sunucu açıldı ({0})",
+    a_stop_requested: "sunucuyu kapattı ({0} sn uyarı)", a_restart_requested: "sunucuyu yeniden başlattı ({0} sn uyarı)",
+    a_stopped: "Kaydedildi ve kapatıldı", a_kill_requested: "sunucuyu zorla kapattı", a_killed: "Sunucu zorla kapatıldı",
+    a_unstuck_ok: "{0} oyuncusunu kurtardı", a_unstuck_failed: "kurtarma başarısız: {0}",
+    a_cancel_ok: "kapatmayı iptal etti", a_cancel_failed: "iptal edilemedi: {0}",
+    a_crash_detected: "Sunucu beklenmedik şekilde kapandı (çıkış kodu {0})",
+    a_crash_giveup: "15 dakikada 3 kez çöktü, otomatik başlatma durduruldu",
+    a_crash_restart_skipped: "Otomatik başlatma atlandı, başka bir işlem sürüyordu",
+  },
+  en: {
+    sign_out: "Sign out", signin_title: "Server panel", signin_lead: "Sign in with the panel password your host gave you. Your name shows in the activity list.",
+    your_name: "Your name", password: "Panel password", sign_in: "Sign in",
+    name_required: "Enter your name.", wrong_password: "Wrong password.", too_many_attempts: "Too many wrong attempts. Try again in 10 minutes.", network: "Can't reach the panel.",
+    signed_in_as: "Signed in as {0}",
+    start: "Start server", restart: "Restart", stop: "Stop", force_stop: "Force stop", warning: "Warning",
+    cancel_shutdown: "Cancel shutdown", back: "Go back", activity: "Recent activity",
+    s_0: "None", s_sec: "{0} s", s_min: "{0} min",
+    state_running: "Server is running", state_starting: "Server is starting", state_stopped: "Server is stopped", state_notResponding: "Server is not responding",
+    fact_save: "Save: {0}", fact_next_save: "Loads save {0} when started", fact_no_save: "No save is set. Fill in SaveName in panelsettings.json.",
+    fact_online: "{0} players connected", fact_loading: "Loading the save. This can take a few minutes.",
+    fact_not_responding: "If it is loading or saving, give it a minute. If it stays like this, force stop it.",
+    players: "Players", players_n: "Players ({0})", no_players: "Nobody has joined yet.", players_offline_server: "Players show here once the server is running.",
+    online: "Connected", offline: "Not connected", unstuck: "Unstuck",
+    confirm_stop_title: "Stop the server?", confirm_restart_title: "Restart the server?",
+    confirm_stop_text: "Players are warned, everyone is disconnected after {0}, and the game is saved.",
+    confirm_now: "Players are disconnected right away and the game is saved.",
+    confirm_kill_title: "Force stop?",
+    confirm_kill_text: "The server closes without saving. Progress since the last save is lost. Use this only if the server is stuck.",
+    unstuck_done: "Unstuck {0}.", busy: "Another action is in progress.", bad_seconds: "That warning time isn't valid.",
+    panel: "Panel", just_now: "now",
+    start_requested: "Starting the server", starting: "Loading save {0}", started: "Server is up",
+    stop_requested: "Stop requested", restart_requested: "Restart requested", kill_requested: "Force stopping the server",
+    countdown: "Players warned. Closing in {0} s", countdown_nosec: "Players warned",
+    draining: "Disconnecting players", saving: "Saving the game", closing: "Closing the server", stopped: "Saved and stopped", killed: "Server force-stopped",
+    already_running: "The server is already running.", no_save: "No save to load. Fill in SaveName in panelsettings.json.",
+    exe_missing: "Bannerlord.exe not found: {0}", start_failed: "Couldn't start the server: {0}",
+    start_exited: "The server closed while starting (exit code {0}). Check Coop_server.log.",
+    start_timeout: "The server didn't answer within 10 minutes. Does it run the panel-enabled Coop build?",
+    not_responding: "The server isn't answering. Force stop it if it's stuck.", shutdown_refused: "The server refused to shut down: {0}",
+    shutdown_timeout: "The shutdown took longer than expected. Check the server.",
+    save_failed: "Saving failed, so the server was left running: {0}", stop_cancelled: "Shutdown cancelled.",
+    not_running: "No server is running.", kill_failed: "Couldn't end the server process.", unexpected_error: "Unexpected error: {0}",
+    a_signed_in: "signed in", a_start_requested: "started the server ({0})", a_started: "Server is up ({0})",
+    a_stop_requested: "stopped the server ({0} s warning)", a_restart_requested: "restarted the server ({0} s warning)",
+    a_stopped: "Saved and stopped", a_kill_requested: "force-stopped the server", a_killed: "Server force-stopped",
+    a_unstuck_ok: "unstuck {0}", a_unstuck_failed: "unstuck failed: {0}",
+    a_cancel_ok: "cancelled the shutdown", a_cancel_failed: "couldn't cancel: {0}",
+    a_crash_detected: "Server closed unexpectedly (exit code {0})",
+    a_crash_giveup: "Crashed 3 times in 15 minutes; automatic start is paused",
+    a_crash_restart_skipped: "Automatic start skipped; another action was running",
+  },
+};
+
+// Activity codes that describe the server rather than something a person did.
+const SYSTEM_CODES = new Set(["started", "stopped", "killed", "crash_detected", "crash_giveup", "crash_restart_skipped",
+  "already_running", "no_save", "exe_missing", "start_failed", "start_exited", "start_timeout", "not_responding",
+  "shutdown_refused", "shutdown_timeout", "save_failed", "stop_cancelled", "not_running", "kill_failed", "unexpected_error"]);
+
+const STATE_COLORS = { running: "var(--green)", starting: "var(--amber)", stopped: "var(--muted)", notResponding: "var(--red)" };
+const WARNING_CHOICES = [0, 10, 30, 60, 120, 300, 600];
+
+let lang = pickLanguage();
+let status = null;
+let warnChosen = null;
+let pollTimer = null;
+
+const $ = (id) => document.getElementById(id);
+
+function pickLanguage() {
+  try {
+    const saved = localStorage.getItem("panel-lang");
+    if (saved === "tr" || saved === "en") return saved;
+  } catch (e) { /* storage unavailable */ }
+  return (navigator.language || "").toLowerCase().startsWith("tr") ? "tr" : "en";
+}
+
+function t(key, ...args) {
+  const table = STRINGS[lang];
+  let text = table[key] ?? STRINGS.en[key] ?? key;
+  args.forEach((value, i) => { text = text.replace(`{${i}}`, value ?? ""); });
+  return text;
+}
+
+function formatSeconds(seconds) {
+  if (seconds === 0) return t("s_0");
+  return seconds % 60 === 0 && seconds >= 60 ? t("s_min", seconds / 60) : t("s_sec", seconds);
+}
+
+function applyStaticText() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+  const select = $("warn");
+  const current = select.value;
+  select.replaceChildren(...WARNING_CHOICES.map((s) => new Option(formatSeconds(s), String(s))));
+  if (current) select.value = current;
+}
+
+async function api(path, body) {
+  const options = body === undefined
+    ? { credentials: "same-origin" }
+    : { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Coop-Panel": "1" }, body: JSON.stringify(body) };
+  const response = await fetch(path, options);
+  let data = null;
+  try { data = await response.json(); } catch (e) { /* empty body */ }
+  return { status: response.status, data };
+}
+
+function showToast(text, isError) {
+  const toast = $("toast");
+  toast.textContent = text;
+  toast.classList.toggle("error", !!isError);
+  toast.hidden = false;
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => { toast.hidden = true; }, isError ? 8000 : 4000);
+}
+
+function showSignIn() {
+  stopPolling();
+  $("panel").hidden = true;
+  $("signin").hidden = false;
+  $("logout").hidden = true;
+  $("who").textContent = "";
+  try { $("name").value = localStorage.getItem("panel-name") || ""; } catch (e) { /* ignore */ }
+  ($("name").value ? $("password") : $("name")).focus();
+}
+
+function showPanel() {
+  $("signin").hidden = true;
+  $("panel").hidden = false;
+  $("logout").hidden = false;
+  startPolling();
+}
+
+function startPolling() {
+  stopPolling();
+  refresh();
+  pollTimer = setInterval(refresh, 2000);
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+async function refresh() {
+  try {
+    const { status: code, data } = await api("/api/status");
+    if (code === 401) { showSignIn(); return; }
+    if (code !== 200 || !data) return;
+    status = data;
+    render();
+  } catch (e) {
+    $("state-title").textContent = t("network");
+  }
+}
+
+function render() {
+  const s = status;
+  const server = s.server;
+  const op = s.operation;
+  const opRunning = !!(op && op.running);
+  const players = (server && server.players) || [];
+  const online = players.filter((p) => p.connected);
+
+  $("who").textContent = t("signed_in_as", s.user);
+
+  // A server that answers but is still loading its save reads as starting.
+  const launching = opRunning && ["start_requested", "starting"].includes(op.code);
+  const shown = (s.state === "running" && !server.campaignLoaded) || (s.state === "stopped" && launching)
+    ? "starting" : s.state;
+
+  // Headline and banner
+  const pennant = $("state-pennant");
+  pennant.style.setProperty("--state-color", STATE_COLORS[shown] || "var(--muted)");
+  const countingDown = opRunning && ["countdown", "draining", "saving", "closing", "starting", "start_requested"].includes(op.code);
+  pennant.classList.toggle("sway", shown === "starting" || countingDown);
+  $("state-title").textContent = t("state_" + shown);
+
+  const facts = [];
+  if (shown === "running") {
+    if (server.launchSave) facts.push(t("fact_save", server.launchSave));
+    facts.push(t("fact_online", online.length));
+  } else if (shown === "starting") {
+    const save = (server && server.launchSave) || s.nextSave;
+    if (save) facts.push(t("fact_save", save));
+    facts.push(t("fact_loading"));
+  } else if (s.state === "stopped") {
+    facts.push(s.nextSave ? t("fact_next_save", s.nextSave) : t("fact_no_save"));
+  } else {
+    if (s.problem) facts.push(s.problem);
+    facts.push(t("fact_not_responding"));
+  }
+  $("facts").replaceChildren(...facts.map((f) => { const p = document.createElement("p"); p.textContent = f; return p; }));
+
+  // Buttons
+  const running = s.state === "running";
+  $("btn-start").hidden = shown !== "stopped";
+  $("btn-start").disabled = opRunning || !s.nextSave;
+  $("btn-restart").hidden = !running;
+  $("btn-stop").hidden = !running;
+  $("warn-wrap").hidden = !running;
+  $("btn-restart").disabled = $("btn-stop").disabled = opRunning || !(server && server.campaignLoaded);
+  $("btn-kill").hidden = !(s.state === "notResponding" || s.state === "starting" || running);
+  $("btn-kill").disabled = opRunning && op.name === "kill";
+  if (warnChosen === null) { warnChosen = String(s.warningSeconds); $("warn").value = warnChosen; }
+
+  // Operation progress
+  const box = $("progress");
+  const recent = op && (op.running || (op.finishedAt && Date.now() - Date.parse(op.finishedAt) < 30000));
+  box.hidden = !recent;
+  if (recent) {
+    box.classList.toggle("failed", !op.running && op.failed);
+    box.classList.toggle("done", !op.running && !op.failed);
+    let text;
+    if (op.code === "countdown") text = op.detail ? t("countdown", op.detail) : t("countdown_nosec");
+    else text = t(op.code, op.detail);
+    $("progress-text").textContent = text;
+    $("btn-cancel").hidden = !(op.running && op.code === "countdown");
+  }
+
+  // Players
+  const heading = $("players-heading");
+  heading.textContent = running && server.campaignLoaded ? t("players_n", online.length) : t("players");
+  const sorted = [...players].sort((a, b) => Number(b.connected) - Number(a.connected));
+  $("roster").replaceChildren(...sorted.map(renderPlayer));
+  const empty = $("roster-empty");
+  empty.hidden = players.length > 0;
+  empty.textContent = running ? t("no_players") : t("players_offline_server");
+
+  // Activity
+  $("activity").replaceChildren(...(s.activity || []).map(renderActivity));
+}
+
+function renderPlayer(p) {
+  const li = document.createElement("li");
+  const name = document.createElement("div");
+  name.className = "hero-name";
+  name.textContent = p.hero || p.name || p.controllerId;
+  const meta = document.createElement("div");
+  meta.className = "meta" + (p.connected ? " online" : "");
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  meta.append(dot, document.createTextNode((p.connected ? t("online") : t("offline")) + (p.hero && p.name ? ", " + p.name : "")));
+  li.append(name, meta);
+  if (p.connected) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn small";
+    button.textContent = t("unstuck");
+    button.addEventListener("click", () => unstuck(p, button));
+    li.append(button);
+  }
+  return li;
+}
+
+function renderActivity(entry) {
+  const li = document.createElement("li");
+  const time = document.createElement("time");
+  const at = new Date(entry.at);
+  time.dateTime = entry.at;
+  time.textContent = at.toLocaleTimeString(lang === "tr" ? "tr-TR" : "en-GB", { hour: "2-digit", minute: "2-digit" });
+  const text = document.createElement("span");
+  if (entry.kind === "error") text.className = "error";
+  const sentence = t("a_" + entry.code, entry.detail) !== "a_" + entry.code ? t("a_" + entry.code, entry.detail) : t(entry.code, entry.detail);
+  if (SYSTEM_CODES.has(entry.code) || entry.user === "panel") {
+    text.textContent = sentence;
+  } else {
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = entry.user;
+    text.append(who, document.createTextNode(" " + sentence));
+  }
+  li.append(time, text);
+  return li;
+}
+
+function confirmAction(title, text, okLabel) {
+  return new Promise((resolve) => {
+    const dialog = $("confirm");
+    $("confirm-title").textContent = title;
+    $("confirm-text").textContent = text;
+    $("confirm-ok").textContent = okLabel;
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "ok"), { once: true });
+    dialog.returnValue = "";
+    dialog.showModal();
+  });
+}
+
+async function runAction(path, body) {
+  const { status: code, data } = await api(path, body);
+  if (code === 401) { showSignIn(); return; }
+  if (code >= 400) showToast(t((data && data.error) || "unexpected_error", ""), true);
+  refresh();
+}
+
+async function unstuck(player, button) {
+  button.disabled = true;
+  try {
+    const { status: code, data } = await api("/api/unstuck", { controllerId: player.controllerId });
+    if (code === 401) { showSignIn(); return; }
+    if (data && data.ok) showToast(t("unstuck_done", player.hero || player.name || player.controllerId));
+    else showToast((data && (data.message || t(data.error))) || t("unexpected_error", ""), true);
+  } finally {
+    button.disabled = false;
+    refresh();
+  }
+}
+
+$("signin-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("name").value.trim();
+  const password = $("password").value;
+  const error = $("signin-error");
+  if (!name) { error.textContent = t("name_required"); $("name").focus(); return; }
+  error.textContent = "";
+  try {
+    const { status: code, data } = await api("/api/login", { name, password });
+    if (code === 200) {
+      try { localStorage.setItem("panel-name", name); } catch (e) { /* ignore */ }
+      $("password").value = "";
+      showPanel();
+    } else {
+      error.textContent = t((data && data.error) || "wrong_password");
+    }
+  } catch (e) {
+    error.textContent = t("network");
+  }
+});
+
+$("logout").addEventListener("click", async () => { await api("/api/logout", {}); showSignIn(); });
+
+document.querySelectorAll("[data-lang]").forEach((button) => button.addEventListener("click", () => {
+  lang = button.dataset.lang;
+  try { localStorage.setItem("panel-lang", lang); } catch (e) { /* ignore */ }
+  applyStaticText();
+  if (status) render();
+}));
+
+$("warn").addEventListener("change", (event) => { warnChosen = event.target.value; });
+
+$("btn-start").addEventListener("click", () => runAction("/api/start", {}));
+
+for (const [id, kind] of [["btn-stop", "stop"], ["btn-restart", "restart"]]) {
+  $(id).addEventListener("click", async () => {
+    const seconds = Number($("warn").value);
+    const ok = await confirmAction(
+      t(kind === "stop" ? "confirm_stop_title" : "confirm_restart_title"),
+      seconds === 0 ? t("confirm_now") : t("confirm_stop_text", formatSeconds(seconds)),
+      t(kind));
+    if (ok) runAction("/api/" + kind, { seconds });
+  });
+}
+
+$("btn-kill").addEventListener("click", async () => {
+  if (await confirmAction(t("confirm_kill_title"), t("confirm_kill_text"), t("force_stop"))) runAction("/api/kill", {});
+});
+
+$("btn-cancel").addEventListener("click", async () => {
+  const { data } = await api("/api/cancel", {});
+  if (data && !data.ok) showToast(data.message || t("unexpected_error", ""), true);
+  refresh();
+});
+
+applyStaticText();
+(async () => {
+  const { status: code } = await api("/api/status").catch(() => ({ status: 0 }));
+  if (code === 200) showPanel(); else showSignIn();
+})();
+</script>
+</body>
+</html>
