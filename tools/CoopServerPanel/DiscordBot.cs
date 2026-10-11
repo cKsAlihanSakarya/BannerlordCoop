@@ -37,9 +37,11 @@ public sealed class DiscordBot : BackgroundService
         this.logger = logger;
     }
 
-    /// <summary>Shown on the web page: off, connecting, connected or the reason Discord refused.</summary>
+    private volatile string setupProblem;
+
+    /// <summary>Shown on the web page: off, connecting, connected, or why Discord refused.</summary>
     public string Status => !settings.DiscordEnabled ? "off"
-        : gateway?.FatalError ?? (gateway?.Connected == true ? "connected" : "connecting");
+        : gateway?.FatalError ?? setupProblem ?? (gateway?.Connected == true ? "connected" : "connecting");
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
@@ -47,38 +49,77 @@ public sealed class DiscordBot : BackgroundService
         stopping = token;
         rest = new DiscordRest(settings);
 
-        while (!token.IsCancellationRequested)
+        // The token has to work before anything else does.
+        while (applicationId == null && !token.IsCancellationRequested)
         {
             try
             {
                 JsonElement? app = await rest.SendAsync(HttpMethod.Get, "/applications/@me", null, token);
                 applicationId = app?.GetProperty("id").GetString();
-                await rest.SendAsync(HttpMethod.Put,
-                    $"/applications/{applicationId}/guilds/{settings.DiscordGuildId.Trim()}/commands", Commands(), token);
-                logger.LogInformation("Discord commands registered");
-                break;
             }
-            catch (DiscordException exception) when (exception.Status is 401 or 403)
+            catch (DiscordException exception) when (exception.Status == 401)
             {
-                logger.LogError("Discord refused the bot ({Status}). Check DiscordToken, and that the bot was invited to DiscordGuildId with applications.commands.",
-                    exception.Status);
+                setupProblem = "token_rejected";
+                logger.LogError("Discord rejected DiscordToken (401). Copy the token again from the Developer Portal (Bot, Reset Token).");
                 return;
             }
             catch (Exception exception) when (exception is DiscordException or HttpRequestException or TaskCanceledException
                                                   && !token.IsCancellationRequested)
             {
-                logger.LogWarning("Discord setup failed, retrying in 30 s: {Message}", exception.Message);
+                setupProblem = "unreachable";
+                logger.LogWarning("Discord can't be reached, retrying in 30 s: {Message}", exception.Message);
                 await Task.Delay(TimeSpan.FromSeconds(30), token);
             }
         }
+        if (applicationId == null) return;
+        setupProblem = null;
 
         activity.Added += OnActivity;
         Task players = settings.DiscordNotifyPlayers && HasChannel ? WatchPlayersAsync(token) : Task.CompletedTask;
+        // The bot comes online even when the commands are refused, so the cause shows up here.
+        Task commands = RegisterCommandsAsync(token);
 
         gateway = new DiscordGateway(settings, logger, OnDispatchAsync);
         await gateway.RunAsync(token);
         activity.Added -= OnActivity;
         await players;
+        await commands;
+    }
+
+    /// <summary>Registers the slash commands, retrying every 2 minutes until Discord accepts them.</summary>
+    private async Task RegisterCommandsAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await rest.SendAsync(HttpMethod.Put,
+                    $"/applications/{applicationId}/guilds/{settings.DiscordGuildId.Trim()}/commands", Commands(), token);
+                setupProblem = null;
+                logger.LogInformation("Discord commands registered in server {Guild}", settings.DiscordGuildId);
+                return;
+            }
+            catch (DiscordException exception) when (exception.Status is 403 or 404)
+            {
+                setupProblem = "commands_rejected";
+                logger.LogError("Discord refused the slash commands in server {Guild} ({Status}): {Message}. Check DiscordGuildId, and invite the bot again with the applications.commands scope ticked.",
+                    settings.DiscordGuildId, exception.Status, exception.Message);
+            }
+            catch (Exception exception) when (exception is DiscordException or HttpRequestException or TaskCanceledException
+                                                  && !token.IsCancellationRequested)
+            {
+                logger.LogWarning("Discord command registration failed: {Message}", exception.Message);
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMinutes(2), token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
     }
 
     private bool HasChannel => ulong.TryParse(settings.DiscordChannelId?.Trim(), out _);

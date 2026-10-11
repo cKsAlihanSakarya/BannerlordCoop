@@ -43,6 +43,7 @@ builder.Logging.AddSimpleConsole(options =>
     options.SingleLine = true;
     options.TimestampFormat = "HH:mm:ss ";
 });
+builder.Logging.AddProvider(new FileLoggerProvider(Path.Combine(AppContext.BaseDirectory, "panel.log")));
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 // Keys live in the user profile; the unencrypted-at-rest notice is expected for a local tool.
 builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Error);
