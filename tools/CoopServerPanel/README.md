@@ -1,22 +1,14 @@
 # Coop Server Panel
 
-A small web panel for a dedicated co-op server. Players open it in a browser to start, stop or restart the server and to unstick a player, without the host being at the computer.
+A small web panel for the official dedicated server (`DedicatedServer\BannerlordCoopServer.exe`). Players open it in a browser to start, stop or restart the server and to unstick a player, without the host being at the computer.
 
-## How it works
+Nothing in the mod or the server changes. The panel does what the host would do by hand:
 
-The server side lives in `source/Coop.Core/Server/Services/Admin`. While a server session runs, `ServerAdminPipeHost` serves a local named pipe, `BannerlordCoop.ServerAdmin.<port>` (4200 by default). Each connection sends one request line and gets one JSON line back:
+- It starts `BannerlordCoopServer.exe` in its own window, the same as a double-click.
+- It types commands into that window: `coop.debug.players.list`, `coop.unstuck <controller id>`, `coop.server.shutdown <seconds>`, `stop`.
+- It reads the server's answers, its phase and its player list from `logs\coop-server-*.log` in the server's data folder. That folder is `Documents\Mount and Blade II Bannerlord\CoopData\DedicatedServer` by default. The server writes `@DS@{"ev":"state",...}` and `@DS@{"ev":"players",...}` lines there.
 
-| Request | Does |
-| --- | --- |
-| `status` | process id, launch save, whether the campaign is loaded, shutdown phase, players |
-| `unstuck <controller id>` | runs `coop.unstuck <controller id>` |
-| `shutdown <seconds>` | runs `coop.server.shutdown <seconds>` |
-| `cancel` | runs `coop.server.shutdown cancel` |
-| `exit` | quits the process, only after the shutdown has saved or while no campaign is loaded |
-
-Commands go through `ICoopCommandRegistry` on the game thread, the same path as the developer console. The pipe is local to the machine and its default ACL only lets the account running the server write to it.
-
-The panel (this folder) runs on the same computer as the server. It launches `Bannerlord.exe` with the dedicated-server arguments, polls `status`, and serves one page. Stop and restart always use `coop.server.shutdown`, so players get the usual warnings and the campaign is saved before the process closes. If the server process exits on its own after it was running, the panel starts it again (at most 3 times in 15 minutes).
+A stop with a warning runs `coop.server.shutdown <seconds>` first, which warns players, closes joins, disconnects everyone and saves. It then runs `stop`, which saves again and exits. When nobody is connected, or the warning is 0, it runs `stop` right away. If the server exits on its own after it was serving, the panel starts it again, at most 3 times in 15 minutes. An exit code of 0 counts as a stop from the server window and isn't restarted.
 
 ## Build
 
@@ -28,8 +20,6 @@ dotnet publish tools\CoopServerPanel -c Release -r win-x64 --self-contained -p:P
 
 This gives `publish\CoopServerPanel.exe`, which runs without .NET installed.
 
-The server only answers the panel when its Coop build includes the admin pipe. The change adds no network messages, so players don't need anything new.
-
 ## Configure
 
 The first run creates `panelsettings.json` next to the exe, prints a random panel password and exits. Edit the file, then start the panel again:
@@ -38,17 +28,15 @@ The first run creates `panelsettings.json` next to the exe, prints a random pane
 | --- | --- |
 | `PanelPassword` | password friends type to sign in |
 | `ListenUrl` | `http://0.0.0.0:8090` accepts other computers, `http://127.0.0.1:8090` only this one |
-| `BannerlordExe` | full path to `bin\Win64_Shipping_Client\Bannerlord.exe` |
-| `Modules` | module ids in load order, same as the players use |
-| `SaveName` | save to host, as shown in the save list without `.sav` |
-| `ServerPassword` | join password, empty for none |
-| `Visibility` | `public`, `friends_only` or `none` |
-| `GamePort` | server port, also names the pipe |
+| `ServerExe` | full path to `DedicatedServer\BannerlordCoopServer.exe` in the Coop module |
+| `DataDir` | the server's data folder, empty for its default. Passed as `--data-dir` |
 | `WarningSeconds` | default warning before a stop or restart |
 | `RestartOnCrash` | start the server again after an unexpected exit |
-| `ExtraArguments` | appended to the launch arguments |
+| `ExtraArguments` | appended to the server's launch arguments |
 
-Steam has to be running on the host, the same as for hosting from the game.
+What the server hosts (save, join password, port, Steam) stays in the server's own `server-config.json`. Keep `"logFile": true` there, because the panel reads the server through its log.
+
+The panel and the server must run with the same rights. If the server is started as administrator, start the panel as administrator too. Otherwise Windows doesn't let the panel type into the server window.
 
 ## Reaching the panel from other computers
 
@@ -57,7 +45,7 @@ The panel speaks plain HTTP. The simplest safe setup is a private network such a
 ## Manual test
 
 1. Start the panel and sign in.
-2. Press Start server. The page shows the server starting, then running with the save name once the campaign is loaded.
-3. Join with a client, open the panel and press Unstuck next to that player. The activity list shows the result and `Coop_server.log` has an `Operator unstuck` line.
-4. Press Restart with a 30 s warning. The client sees the restart notice, gets disconnected, the save is written and the server comes back with the same save.
+2. Press Start server. A server window opens. The page shows the server starting, then running with the save name once the log shows `SERVING`.
+3. Join with a client. The player shows up with "Playing". Press Unstuck next to the player. The server window shows `> coop.unstuck <id>` and the activity list shows the result.
+4. Press Restart with a 30 s warning. The client sees the restart notice and gets disconnected. The server saves, closes and comes back with the same save.
 5. Press Restart again and then Cancel shutdown during the countdown. The client sees the cancel notice and stays connected.

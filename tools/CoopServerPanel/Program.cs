@@ -8,6 +8,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+if (args.Length > 0 && args[0] == WindowsConsoleTyper.HelperArgument)
+    return WindowsConsoleTyper.RunHelper(args);
+
 string settingsPath = args.Length > 0 ? Path.GetFullPath(args[0]) : PanelSettings.DefaultPath;
 PanelSettings settings;
 try
@@ -19,7 +22,7 @@ try
     }
     if (created)
     {
-        Console.WriteLine($"Created {settingsPath}. Set BannerlordExe and SaveName there, then start the panel again.");
+        Console.WriteLine($"Created {settingsPath}. Check ServerExe there, then start the panel again.");
         return 0;
     }
 }
@@ -45,7 +48,10 @@ builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Error);
 
 builder.Services.AddSingleton(settings);
-builder.Services.AddSingleton(new AdminPipeClient(settings.GamePort));
+builder.Services.AddSingleton(new ServerLog(settings.EffectiveDataDir));
+builder.Services.AddSingleton<IConsoleTyper>(OperatingSystem.IsWindows()
+    ? new WindowsConsoleTyper()
+    : new FileConsoleTyper(settings.EffectiveDataDir));
 builder.Services.AddSingleton<ActivityLog>();
 builder.Services.AddSingleton<ServerSupervisor>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ServerSupervisor>());
@@ -144,9 +150,12 @@ api.MapGet("/status", (HttpContext context, ServerSupervisor supervisor, Activit
         state = snapshot.State,
         problem = snapshot.Problem,
         checkedAt = snapshot.CheckedAt,
-        server = snapshot.Server,
+        save = snapshot.Save,
+        passwordSet = snapshot.PasswordSet,
+        players = snapshot.Players,
         operation = supervisor.Operation,
-        nextSave = supervisor.NextSave,
+        nextSave = supervisor.ConfiguredSave,
+        logFileEnabled = supervisor.LogFileEnabled,
         warningSeconds = settings.WarningSeconds,
         activity = log.Recent(30),
     });
@@ -170,18 +179,18 @@ api.MapPost("/kill", (HttpContext context, ServerSupervisor supervisor) =>
 
 api.MapPost("/cancel", async (HttpContext context, ServerSupervisor supervisor) =>
 {
-    var (ok, message) = await supervisor.CancelShutdownAsync(UserOf(context), context.RequestAborted);
-    return Results.Json(new { ok, message });
+    var (ok, code, message) = await supervisor.CancelShutdownAsync(UserOf(context), context.RequestAborted);
+    return Results.Json(new { ok, error = code, message });
 });
 
 api.MapPost("/unstuck", async (UnstuckRequest request, HttpContext context, ServerSupervisor supervisor) =>
 {
-    string controllerId = request?.ControllerId?.Trim();
-    if (string.IsNullOrEmpty(controllerId) || controllerId.Length > 128 || controllerId.Any(char.IsControl))
+    string name = request?.Name?.Trim();
+    if (string.IsNullOrEmpty(name) || name.Length > 128 || name.Any(char.IsControl))
         return Results.Json(new { error = "bad_player" }, statusCode: StatusCodes.Status400BadRequest);
 
-    var (ok, message) = await supervisor.UnstuckAsync(UserOf(context), controllerId, context.RequestAborted);
-    return Results.Json(new { ok, message });
+    var (ok, code, message) = await supervisor.UnstuckAsync(UserOf(context), name, context.RequestAborted);
+    return Results.Json(new { ok, error = code, message });
 });
 
 app.Logger.LogInformation("Panel listening on {Url}", settings.ListenUrl);
@@ -218,7 +227,7 @@ static string ReadEmbeddedPage()
 
 record LoginRequest(string Name, string Password);
 record DelayRequest(int? Seconds);
-record UnstuckRequest(string ControllerId);
+record UnstuckRequest(string Name);
 
 /// <summary>Five wrong passwords from one address lock it out for ten minutes.</summary>
 sealed class LoginThrottle

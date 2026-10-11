@@ -113,7 +113,6 @@ public class GameInterfaceModule : Module
         builder.RegisterType<TimeControlModeConverter>().As<ITimeControlModeConverter>().InstancePerLifetimeScope();
         builder.RegisterType<Services.Crime.CrimeRatingService>().As<Services.Crime.ICrimeRatingService>().InstancePerDependency();
         builder.RegisterType<PlayerManager>().As<IPlayerManager>().InstancePerLifetimeScope();
-        builder.RegisterType<Services.GameState.GameProcessExit>().As<Services.GameState.IGameProcessExit>().InstancePerDependency();
         builder.RegisterType<HideoutPreparation>().As<IHideoutPreparation>().InstancePerDependency();
         builder.RegisterType<BugReportService>().As<IBugReportService>().InstancePerLifetimeScope().AutoActivate();
         builder.RegisterType<BugReportOverlay>().As<IBugReportOverlay>().InstancePerLifetimeScope();

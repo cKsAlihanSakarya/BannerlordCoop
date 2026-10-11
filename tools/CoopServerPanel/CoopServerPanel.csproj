@@ -11,7 +11,5 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="wwwroot/index.html" LogicalName="index.html" />
-    <!-- Shares the pipe name and request format with the server side. -->
-    <Compile Include="../../source/Coop.Core/Server/Services/Admin/ServerAdminProtocol.cs" Link="Protocol/ServerAdminProtocol.cs" />
   </ItemGroup>
 </Project>

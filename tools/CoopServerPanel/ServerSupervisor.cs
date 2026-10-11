@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -9,15 +10,23 @@ public enum ServerState
 {
     /// <summary>No server process.</summary>
     Stopped,
-    /// <summary>The panel started the process and it is still loading.</summary>
+    /// <summary>The process runs and is booting or loading the campaign.</summary>
     Starting,
-    /// <summary>The server answers on its admin pipe.</summary>
+    /// <summary>The server reports it is serving.</summary>
     Running,
-    /// <summary>A server process exists but does not answer.</summary>
+    /// <summary>The server is saving and shutting down.</summary>
+    Stopping,
+    /// <summary>A server process exists but its log went quiet.</summary>
     NotResponding,
 }
 
-public sealed record ServerSnapshot(ServerState State, JsonElement? Server, string Problem, DateTimeOffset CheckedAt);
+public sealed record ServerSnapshot(
+    ServerState State,
+    string Save,
+    bool? PasswordSet,
+    IReadOnlyList<LivePlayer> Players,
+    string Problem,
+    DateTimeOffset CheckedAt);
 
 /// <summary>The current or most recent long action (start, stop, restart, force stop).</summary>
 public sealed record OperationInfo(
@@ -31,66 +40,64 @@ public sealed record OperationInfo(
     DateTimeOffset? FinishedAt);
 
 /// <summary>
-/// Owns the server process: polls the admin pipe, runs one start/stop/restart at a time and
-/// restarts a crashed server. Stops always go through the mod's graceful shutdown, so the
-/// campaign is saved before the process closes.
+/// Runs the official dedicated server (BannerlordCoopServer.exe): starts it in its own window,
+/// types commands into that window the way the host would, and reads the results from the
+/// server's log. Stops warn players with <c>coop.server.shutdown</c> and then use the server's
+/// own <c>stop</c>, which saves the world before it exits.
 /// </summary>
 public sealed class ServerSupervisor : BackgroundService
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan StatusTimeout = TimeSpan.FromSeconds(35);
-    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(40);
+    public const string ProcessName = "BannerlordCoopServer";
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan StartupGrace = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan SilentLimit = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan EchoTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan AnswerWindow = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan AnswerQuiet = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ShutdownMargin = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan CrashWindow = TimeSpan.FromMinutes(15);
     private const int MaxCrashRestarts = 3;
-    private static readonly Regex RemainingSeconds = new(@"remaining=(\d+)s", RegexOptions.CultureInvariant);
+    private const int ExitVerificationFailed = 4;
+    private static readonly Regex ControllerIdLine = new(@"^\s*ControllerId:\s*(\S+)", RegexOptions.CultureInvariant);
+    private static readonly Regex PlayerNameLine = new(@"^\s*-\s*PlayerName:\s*(.+?)\s*$", RegexOptions.CultureInvariant);
 
     private readonly PanelSettings settings;
-    private readonly AdminPipeClient pipe;
-    private readonly ActivityLog log;
+    private readonly ServerLog log;
+    private readonly IConsoleTyper typer;
+    private readonly ActivityLog activity;
     private readonly ILogger<ServerSupervisor> logger;
     private readonly object gate = new();
-    private readonly SemaphoreSlim refreshLock = new(1, 1);
+    private readonly SemaphoreSlim typing = new(1, 1);
     private readonly List<DateTimeOffset> crashTimes = new();
 
     private Process launched;
-    private DateTimeOffset launchedAt;
-    private bool seenRunningSinceLaunch;
+    private bool seenServingSinceLaunch;
     private bool expectingExit;
-    private int knownPid;
-    private string knownLaunchSave;
-    private ServerSnapshot snapshot = new(ServerState.Stopped, null, null, DateTimeOffset.MinValue);
+    private ServerSnapshot snapshot = new(ServerState.Stopped, null, null, Array.Empty<LivePlayer>(), null, DateTimeOffset.MinValue);
     private OperationInfo operation;
     private CancellationToken stoppingToken = CancellationToken.None;
 
-    public ServerSupervisor(PanelSettings settings, AdminPipeClient pipe, ActivityLog log, ILogger<ServerSupervisor> logger)
+    public ServerSupervisor(PanelSettings settings, ServerLog log, IConsoleTyper typer, ActivityLog activity,
+        ILogger<ServerSupervisor> logger)
     {
         this.settings = settings;
-        this.pipe = pipe;
         this.log = log;
+        this.typer = typer;
+        this.activity = activity;
         this.logger = logger;
     }
 
-    public ServerSnapshot Snapshot
-    {
-        get { lock (gate) return snapshot; }
-    }
+    public ServerSnapshot Snapshot { get { lock (gate) return snapshot; } }
 
-    public OperationInfo Operation
-    {
-        get { lock (gate) return operation; }
-    }
+    public OperationInfo Operation { get { lock (gate) return operation; } }
 
-    /// <summary>The save a start would load: the configured one, else the last one the server reported.</summary>
-    public string NextSave
-    {
-        get
-        {
-            lock (gate)
-                return !string.IsNullOrWhiteSpace(settings.SaveName) ? settings.SaveName.Trim() : knownLaunchSave;
-        }
-    }
+    /// <summary>The save server-config.json names, which a start hosts.</summary>
+    public string ConfiguredSave => ReadConfiguredSave();
+
+    /// <summary>False when server-config.json turns the log file off, which the panel needs.</summary>
+    public bool LogFileEnabled => ReadConfigBool("logFile") ?? true;
 
     protected override async Task ExecuteAsync(CancellationToken token)
     {
@@ -99,11 +106,7 @@ public sealed class ServerSupervisor : BackgroundService
         {
             try
             {
-                await RefreshAsync(token);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                break;
+                Refresh();
             }
             catch (Exception exception)
             {
@@ -121,60 +124,57 @@ public sealed class ServerSupervisor : BackgroundService
         }
     }
 
-    public async Task<ServerSnapshot> RefreshAsync(CancellationToken token)
+    public ServerSnapshot Refresh()
     {
-        await refreshLock.WaitAsync(token);
-        try
-        {
-            ServerSnapshot next;
-            DateTimeOffset now = DateTimeOffset.Now;
-            try
-            {
-                JsonElement reply = await pipe.SendAsync("status", StatusTimeout, token);
-                if (IsOk(reply))
-                {
-                    int pid = reply.TryGetProperty("processId", out var pidValue) && pidValue.TryGetInt32(out var id) ? id : 0;
-                    string save = GetString(reply, "launchSave");
-                    lock (gate)
-                    {
-                        if (pid > 0) knownPid = pid;
-                        if (!string.IsNullOrEmpty(save)) knownLaunchSave = save;
-                        if (launched != null && SafeId(launched) == pid) seenRunningSinceLaunch = true;
-                    }
-                    next = new ServerSnapshot(ServerState.Running, reply, null, now);
-                }
-                else
-                {
-                    next = new ServerSnapshot(ServerState.NotResponding, null, GetString(reply, "message"), now);
-                }
-            }
-            catch (ServerUnreachableException exception)
-            {
-                int pid = FindServerPid();
-                if (pid == 0)
-                {
-                    next = new ServerSnapshot(ServerState.Stopped, null, null, now);
-                }
-                else
-                {
-                    bool starting;
-                    lock (gate)
-                    {
-                        starting = launched != null && SafeId(launched) == pid && !seenRunningSinceLaunch &&
-                                   now - launchedAt < StartupGrace;
-                    }
-                    next = new ServerSnapshot(starting ? ServerState.Starting : ServerState.NotResponding, null,
-                        exception.Message, now);
-                }
-            }
+        log.Poll();
 
-            lock (gate) snapshot = next;
-            return next;
-        }
-        finally
+        Process process = FindServer();
+        DateTimeOffset now = DateTimeOffset.Now;
+        ServerState state;
+        string problem = null;
+
+        // A log from before this process started describes an earlier session. When the start
+        // time can't be read (a server run as another account), trust the newest log.
+        DateTimeOffset? started = process == null ? null : SafeStartTime(process);
+        bool logIsCurrent = process != null && log.CurrentFile != null &&
+                            (started == null || log.FileCreatedAt >= started.Value.AddSeconds(-30));
+        string phase = logIsCurrent ? log.Phase : null;
+
+        if (process == null)
         {
-            refreshLock.Release();
+            state = ServerState.Stopped;
         }
+        else if (phase == "serving")
+        {
+            state = now - log.LastWriteAt > SilentLimit ? ServerState.NotResponding : ServerState.Running;
+            if (state == ServerState.NotResponding) problem = "silent";
+            lock (gate)
+            {
+                if (launched != null && SafeId(launched) == SafeId(process)) seenServingSinceLaunch = true;
+            }
+        }
+        else if (phase == "stopping")
+        {
+            state = ServerState.Stopping;
+        }
+        else
+        {
+            DateTimeOffset since = started ?? (logIsCurrent ? log.FileCreatedAt : now);
+            state = now - since < StartupGrace ? ServerState.Starting : ServerState.NotResponding;
+            if (state == ServerState.NotResponding) problem = logIsCurrent ? "stuck_loading" : "no_log";
+        }
+
+        var next = new ServerSnapshot(
+            state,
+            logIsCurrent ? log.Save : null,
+            logIsCurrent ? log.PasswordSet : null,
+            logIsCurrent && state != ServerState.Stopped ? log.Players : Array.Empty<LivePlayer>(),
+            problem,
+            now);
+
+        process?.Dispose();
+        lock (gate) snapshot = next;
+        return next;
     }
 
     public bool TryStart(string user, out string error) =>
@@ -189,63 +189,61 @@ public sealed class ServerSupervisor : BackgroundService
     public bool TryForceStop(string user, out string error) =>
         TryRunOperation("kill", user, token => ForceStopAsync(user, token), out error);
 
-    public async Task<(bool Ok, string Message)> UnstuckAsync(string user, string controllerId, CancellationToken token)
-    {
-        string label = DescribePlayer(controllerId);
-        try
-        {
-            JsonElement reply = await pipe.SendAsync($"unstuck {controllerId}", CommandTimeout, token);
-            bool ok = IsOk(reply);
-            string message = GetString(reply, "message");
-            log.Add(user, ok ? "unstuck_ok" : "unstuck_failed", ok ? label : $"{label}: {message}",
-                ok ? ActivityKind.Success : ActivityKind.Error);
-            return (ok, message);
-        }
-        catch (ServerUnreachableException exception)
-        {
-            log.Add(user, "unstuck_failed", $"{label}: {exception.Message}", ActivityKind.Error);
-            return (false, exception.Message);
-        }
-    }
-
-    public async Task<(bool Ok, string Message)> CancelShutdownAsync(string user, CancellationToken token)
+    /// <summary>Looks up the player's controller id with coop.debug.players.list, then runs coop.unstuck.</summary>
+    public async Task<(bool Ok, string Code, string Message)> UnstuckAsync(string user, string playerName, CancellationToken token)
     {
         try
         {
-            JsonElement reply = await pipe.SendAsync("cancel", CommandTimeout, token);
-            bool ok = IsOk(reply);
-            string message = GetString(reply, "message");
-            log.Add(user, ok ? "cancel_ok" : "cancel_failed", ok ? null : message,
+            IReadOnlyList<string> listing = await RunCommandAsync("coop.debug.players.list", token);
+            string controllerId = FindControllerId(listing, playerName);
+            if (controllerId == null)
+            {
+                activity.Add(user, "unstuck_failed", $"{playerName}: not registered", ActivityKind.Error);
+                return (false, "player_not_found", null);
+            }
+
+            IReadOnlyList<string> answer = await RunCommandAsync($"coop.unstuck {controllerId}", token);
+            bool ok = answer.Any(line => line.Contains("Unstuck player", StringComparison.Ordinal));
+            string message = Summarize(answer);
+            activity.Add(user, ok ? "unstuck_ok" : "unstuck_failed", ok ? playerName : $"{playerName}: {message}",
                 ok ? ActivityKind.Success : ActivityKind.Error);
-            return (ok, message);
+            return (ok, ok ? null : "unstuck_refused", message);
         }
-        catch (ServerUnreachableException exception)
+        catch (OperationFailedException failure)
         {
-            log.Add(user, "cancel_failed", exception.Message, ActivityKind.Error);
-            return (false, exception.Message);
+            activity.Add(user, "unstuck_failed", $"{playerName}: {failure.Code}", ActivityKind.Error);
+            return (false, failure.Code, failure.Detail);
         }
     }
 
-    /// <summary>Launch arguments for a dedicated server hosting <paramref name="save"/>.</summary>
-    public static List<string> BuildArguments(PanelSettings settings, string save)
+    public async Task<(bool Ok, string Code, string Message)> CancelShutdownAsync(string user, CancellationToken token)
     {
-        var arguments = new List<string>
+        try
         {
-            "/singleplayer",
-            "/server",
-            "_MODULES_*" + string.Join("*", settings.Modules) + "*_MODULES_",
-            "/coopsave",
-            save,
-            "/coopvisibility",
-            settings.Visibility,
-        };
-
-        if (!string.IsNullOrEmpty(settings.ServerPassword))
-        {
-            arguments.Add("/cooppassword");
-            arguments.Add(settings.ServerPassword);
+            IReadOnlyList<string> answer = await RunCommandAsync("coop.server.shutdown cancel", token);
+            bool ok = answer.Any(line => line.Contains("shutdown cancelled", StringComparison.OrdinalIgnoreCase) ||
+                                         line.Contains("shutdown cleared", StringComparison.OrdinalIgnoreCase));
+            string message = Summarize(answer);
+            activity.Add(user, ok ? "cancel_ok" : "cancel_failed", ok ? null : message,
+                ok ? ActivityKind.Success : ActivityKind.Error);
+            return (ok, ok ? null : "cancel_refused", message);
         }
+        catch (OperationFailedException failure)
+        {
+            activity.Add(user, "cancel_failed", failure.Code, ActivityKind.Error);
+            return (false, failure.Code, failure.Detail);
+        }
+    }
 
+    /// <summary>Launch arguments for BannerlordCoopServer.exe.</summary>
+    public static List<string> BuildArguments(PanelSettings settings)
+    {
+        var arguments = new List<string>();
+        if (!string.IsNullOrWhiteSpace(settings.DataDir))
+        {
+            arguments.Add("--data-dir");
+            arguments.Add(settings.DataDir.Trim());
+        }
         arguments.AddRange(SplitArguments(settings.ExtraArguments));
         return arguments;
     }
@@ -281,6 +279,145 @@ public sealed class ServerSupervisor : BackgroundService
         if (any) yield return current.ToString();
     }
 
+    /// <summary>Quotes one argument per Windows command-line rules.</summary>
+    public static string QuoteArgument(string argument)
+    {
+        if (argument.Length > 0 && !argument.Any(c => c == ' ' || c == '\t' || c == '"')) return argument;
+
+        var builder = new System.Text.StringBuilder("\"");
+        int backslashes = 0;
+        foreach (char c in argument)
+        {
+            if (c == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+            builder.Append('\\', c == '"' ? (backslashes * 2) + 1 : backslashes);
+            builder.Append(c);
+            backslashes = 0;
+        }
+        builder.Append('\\', backslashes * 2);
+        builder.Append('"');
+        return builder.ToString();
+    }
+
+    /// <summary>Finds the ControllerId under "- PlayerName: name" in coop.debug.players.list output.</summary>
+    public static string FindControllerId(IReadOnlyList<string> listing, string playerName)
+    {
+        string current = null;
+        foreach (string line in listing)
+        {
+            Match name = PlayerNameLine.Match(line);
+            if (name.Success)
+            {
+                current = name.Groups[1].Value;
+                continue;
+            }
+
+            Match id = ControllerIdLine.Match(line);
+            if (id.Success && current != null && string.Equals(current, playerName, StringComparison.OrdinalIgnoreCase))
+                return id.Groups[1].Value;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Types <paramref name="command"/> into the server window and returns what it printed in reply:
+    /// the lines after its "&gt; command" echo, without the server's periodic noise.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> RunCommandAsync(string command, CancellationToken token)
+    {
+        await typing.WaitAsync(token);
+        try
+        {
+            int pid = FindServerPid();
+            if (pid == 0) throw new OperationFailedException("not_running");
+
+            log.Poll();
+            long mark = log.Mark;
+
+            TypeResult typed = await Task.Run(() => typer.Type(pid, command), token);
+            switch (typed)
+            {
+                case TypeResult.AccessDenied:
+                    throw new OperationFailedException("needs_admin");
+                case TypeResult.NoConsole:
+                case TypeResult.Failed:
+                    throw new OperationFailedException("type_failed");
+            }
+
+            string echo = "> " + command;
+            DateTimeOffset echoDeadline = DateTimeOffset.Now + EchoTimeout;
+            int echoIndex = -1;
+            IReadOnlyList<string> seen = Array.Empty<string>();
+            while (DateTimeOffset.Now < echoDeadline)
+            {
+                await Task.Delay(150, token);
+                log.Poll();
+                seen = log.LinesSince(mark);
+                echoIndex = IndexOfEcho(seen, echo);
+                if (echoIndex >= 0) break;
+            }
+            if (echoIndex < 0) throw new OperationFailedException("no_echo");
+
+            // The answer is printed right after the echo; stop once the log has been quiet briefly.
+            DateTimeOffset answerDeadline = DateTimeOffset.Now + AnswerWindow;
+            DateTimeOffset lastGrowth = DateTimeOffset.Now;
+            int count = seen.Count;
+            while (DateTimeOffset.Now < answerDeadline && DateTimeOffset.Now - lastGrowth < AnswerQuiet)
+            {
+                await Task.Delay(100, token);
+                log.Poll();
+                seen = log.LinesSince(mark);
+                if (seen.Count != count)
+                {
+                    count = seen.Count;
+                    lastGrowth = DateTimeOffset.Now;
+                }
+            }
+            echoIndex = IndexOfEcho(seen, echo);
+
+            var answer = new List<string>();
+            for (int i = echoIndex + 1; i < seen.Count; i++)
+            {
+                string line = seen[i];
+                if (line.StartsWith("[DedicatedServer] > ", StringComparison.Ordinal)) break;
+                if (IsNoise(line)) continue;
+                answer.Add(line);
+            }
+            return answer;
+        }
+        finally
+        {
+            typing.Release();
+        }
+    }
+
+    private static int IndexOfEcho(IReadOnlyList<string> lines, string echo)
+    {
+        for (int i = 0; i < lines.Count; i++)
+        {
+            string line = lines[i].Trim();
+            if (line.EndsWith(echo, StringComparison.Ordinal) && line.Contains("[DedicatedServer]", StringComparison.Ordinal))
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>Periodic lines that can land between a command and its answer.</summary>
+    private static bool IsNoise(string line) =>
+        line.StartsWith("[DedicatedServer] pulse:", StringComparison.Ordinal) ||
+        line.StartsWith("[Coop] Packet profile", StringComparison.Ordinal) ||
+        line.StartsWith("[Coop] Time control request", StringComparison.Ordinal) ||
+        Regex.IsMatch(line, @"^\[\d\d:\d\d:\d\d\.\d{3}\]");
+
+    private static string Summarize(IReadOnlyList<string> answer)
+    {
+        string text = string.Join(" ", answer.Take(3).Select(line => line.Trim()));
+        return text.Length > 300 ? text.Substring(0, 300) + "…" : text;
+    }
+
     private bool TryRunOperation(string name, string user, Func<CancellationToken, Task> work, out string error)
     {
         lock (gate)
@@ -304,7 +441,7 @@ public sealed class ServerSupervisor : BackgroundService
             }
             catch (OperationFailedException failure)
             {
-                log.Add(user, failure.Code, failure.Detail, failure.Kind);
+                activity.Add(user, failure.Code, failure.Detail, failure.Kind);
                 Progress(failure.Code, failure.Detail);
                 Finish(failed: failure.Kind == ActivityKind.Error);
             }
@@ -315,7 +452,7 @@ public sealed class ServerSupervisor : BackgroundService
             catch (Exception exception)
             {
                 logger.LogError(exception, "Operation {Name} failed", name);
-                log.Add(user, "unexpected_error", exception.Message, ActivityKind.Error);
+                activity.Add(user, "unexpected_error", exception.Message, ActivityKind.Error);
                 Progress("unexpected_error", exception.Message);
                 Finish(failed: true);
             }
@@ -342,35 +479,33 @@ public sealed class ServerSupervisor : BackgroundService
 
     private async Task StartServerAsync(string user, CancellationToken token)
     {
-        ServerSnapshot current = await RefreshAsync(token);
-        if (current.State != ServerState.Stopped)
+        if (Refresh().State != ServerState.Stopped)
             throw new OperationFailedException("already_running");
 
-        string save = NextSave;
-        if (string.IsNullOrWhiteSpace(save))
-            throw new OperationFailedException("no_save");
-
-        string exe = settings.BannerlordExe;
+        string exe = settings.ServerExe;
         if (!File.Exists(exe))
             throw new OperationFailedException("exe_missing", exe);
+        if (!LogFileEnabled)
+            throw new OperationFailedException("log_disabled");
 
+        string save = ConfiguredSave;
+        activity.Add(user, "start_requested", save);
+        Progress("starting", save);
+
+        // Its own window, like a double-click, so the host can still see and type into it.
         var startInfo = new ProcessStartInfo(exe)
         {
             WorkingDirectory = Path.GetDirectoryName(exe),
-            UseShellExecute = false,
+            UseShellExecute = true,
+            Arguments = string.Join(" ", BuildArguments(settings).Select(QuoteArgument)),
         };
-        foreach (string argument in BuildArguments(settings, save))
-            startInfo.ArgumentList.Add(argument);
-
-        log.Add(user, "start_requested", save);
-        Progress("starting", save);
 
         Process process;
         try
         {
             process = Process.Start(startInfo);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             throw new OperationFailedException("start_failed", exception.Message);
         }
@@ -382,36 +517,30 @@ public sealed class ServerSupervisor : BackgroundService
         {
             launched?.Dispose();
             launched = process;
-            launchedAt = DateTimeOffset.Now;
-            seenRunningSinceLaunch = false;
+            seenServingSinceLaunch = false;
             expectingExit = false;
-            knownPid = process.Id;
         }
 
         DateTimeOffset deadline = DateTimeOffset.Now + StartupGrace;
         while (DateTimeOffset.Now < deadline)
         {
-            await Task.Delay(TimeSpan.FromSeconds(3), token);
-
-            ServerSnapshot state = await RefreshAsync(token);
-            if (state.State == ServerState.Running && CampaignLoaded(state))
-            {
-                log.Add(user, "started", save, ActivityKind.Success);
-                Progress("started", save);
-                return;
-            }
+            await Task.Delay(TimeSpan.FromSeconds(2), token);
 
             if (HasExited(process))
             {
-                // A clean, quick exit can be a relaunch through Steam; give the new process a moment.
-                int exitCode = SafeExitCode(process);
-                if (exitCode != 0 || DateTimeOffset.Now - launchedAt > TimeSpan.FromMinutes(2) &&
-                    FindServerPid() == 0)
-                {
-                    throw new OperationFailedException("start_exited",
-                        exitCode.ToString(CultureInfo.InvariantCulture));
-                }
+                int code = SafeExitCode(process);
+                throw new OperationFailedException(code == ExitVerificationFailed ? "start_verification" : "start_exited",
+                    code.ToString(CultureInfo.InvariantCulture));
             }
+
+            ServerSnapshot state = Refresh();
+            if (state.State == ServerState.Running)
+            {
+                activity.Add(user, "started", state.Save ?? save, ActivityKind.Success);
+                Progress("started", state.Save ?? save);
+                return;
+            }
+            Progress("starting", state.Save ?? save);
         }
 
         throw new OperationFailedException("start_timeout");
@@ -419,152 +548,127 @@ public sealed class ServerSupervisor : BackgroundService
 
     private async Task StopServerAsync(string user, int seconds, bool restart, CancellationToken token)
     {
-        log.Add(user, restart ? "restart_requested" : "stop_requested",
+        ServerSnapshot current = Refresh();
+        if (current.State == ServerState.Stopped) throw new OperationFailedException("not_running");
+        if (current.State == ServerState.NotResponding) throw new OperationFailedException("not_responding");
+
+        activity.Add(user, restart ? "restart_requested" : "stop_requested",
             seconds.ToString(CultureInfo.InvariantCulture));
 
-        JsonElement reply;
-        try
-        {
-            reply = await pipe.SendAsync($"shutdown {seconds}", CommandTimeout, token);
-        }
-        catch (ServerUnreachableException)
-        {
-            throw new OperationFailedException("not_responding");
-        }
-
-        if (!IsOk(reply))
-            throw new OperationFailedException("shutdown_refused", GetString(reply, "message"));
-
-        DateTimeOffset deadline = DateTimeOffset.Now + TimeSpan.FromSeconds(seconds) + ShutdownMargin;
-        int pid = 0;
-        while (true)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), token);
-            if (DateTimeOffset.Now > deadline)
-                throw new OperationFailedException("shutdown_timeout");
-
-            ServerSnapshot state = await RefreshAsync(token);
-            if (state.State == ServerState.Stopped) break;
-            // Saving can hold the game thread for a while; keep waiting.
-            if (state.State != ServerState.Running || state.Server is not JsonElement server) continue;
-
-            pid = server.TryGetProperty("processId", out var pidValue) && pidValue.TryGetInt32(out var id) ? id : pid;
-            string phase = null;
-            string detail = null;
-            if (server.TryGetProperty("shutdown", out var shutdown))
-            {
-                phase = GetString(shutdown, "phase");
-                detail = GetString(shutdown, "detail");
-            }
-
-            switch (phase)
-            {
-                case "Countdown":
-                    var match = detail == null ? null : RemainingSeconds.Match(detail);
-                    Progress("countdown", match is { Success: true } ? match.Groups[1].Value : null);
-                    continue;
-                case "Draining":
-                    Progress("draining");
-                    continue;
-                case "Saving":
-                    Progress("saving");
-                    continue;
-                case "Completed":
-                    break;
-                case "Failed":
-                    throw new OperationFailedException("save_failed", detail);
-                case "Idle":
-                    throw new OperationFailedException("stop_cancelled", null, ActivityKind.Info);
-                default:
-                    continue;
-            }
-
-            break;
-        }
+        // Warn, close joins and disconnect everyone first; the server's stop then saves and exits.
+        if (seconds > 0 && current.State == ServerState.Running && current.Players.Count > 0)
+            await WarnAndDrainAsync(seconds, token);
 
         Progress("closing");
-        await CloseServerAsync(pid == 0 ? FindServerPid() : pid, askToExit: true, token);
-        log.Add(user, "stopped", null, ActivityKind.Success);
+        lock (gate) expectingExit = true;
+        int pid = FindServerPid();
+        await RunCommandAsync("stop", token);
+
+        DateTimeOffset deadline = DateTimeOffset.Now + StopTimeout;
+        while (DateTimeOffset.Now < deadline && IsAlive(pid))
+        {
+            await Task.Delay(500, token);
+            if (Refresh().State == ServerState.Stopping) Progress("saving");
+        }
+        if (IsAlive(pid)) throw new OperationFailedException("stop_timeout");
+
+        activity.Add(user, "stopped", null, ActivityKind.Success);
         Progress("stopped");
 
         if (restart) await StartServerAsync(user, token);
     }
 
+    private async Task WarnAndDrainAsync(int seconds, CancellationToken token)
+    {
+        long mark = log.Mark;
+        DateTimeOffset scheduledAt = DateTimeOffset.Now;
+        IReadOnlyList<string> answer = await RunCommandAsync(
+            $"coop.server.shutdown {seconds.ToString(CultureInfo.InvariantCulture)}", token);
+        if (!answer.Any(line => line.Contains("shutdown scheduled", StringComparison.OrdinalIgnoreCase)))
+            throw new OperationFailedException("shutdown_refused", Summarize(answer));
+
+        DateTimeOffset deadline = scheduledAt + TimeSpan.FromSeconds(seconds) + ShutdownMargin;
+        while (true)
+        {
+            await Task.Delay(1000, token);
+            if (DateTimeOffset.Now > deadline) throw new OperationFailedException("shutdown_timeout");
+
+            ServerSnapshot state = Refresh();
+            if (state.State == ServerState.Stopped) return;
+
+            IReadOnlyList<string> lines = log.LinesSince(mark);
+            if (lines.Any(line => line.Contains("Server shutdown complete", StringComparison.Ordinal))) return;
+            if (lines.Any(line => line.Contains("Server shutdown cancelled", StringComparison.Ordinal)))
+                throw new OperationFailedException("stop_cancelled", null, ActivityKind.Info);
+            string failed = lines.LastOrDefault(line => line.Contains("Server shutdown failed", StringComparison.Ordinal));
+            if (failed != null) throw new OperationFailedException("save_failed", failed);
+
+            if (lines.Any(line => line.Contains("Server shutdown: saving", StringComparison.Ordinal)))
+            {
+                Progress("saving");
+                continue;
+            }
+
+            int left = seconds - (int)(DateTimeOffset.Now - scheduledAt).TotalSeconds;
+            Progress(left > 0 ? "countdown" : "draining",
+                left > 0 ? left.ToString(CultureInfo.InvariantCulture) : null);
+        }
+    }
+
     private async Task ForceStopAsync(string user, CancellationToken token)
     {
-        log.Add(user, "kill_requested");
+        activity.Add(user, "kill_requested");
         int pid = FindServerPid();
         if (pid == 0) throw new OperationFailedException("not_running");
 
         Progress("closing");
-        // A server that still answers may be stuck loading; let it quit cleanly if it allows that.
-        await CloseServerAsync(pid, askToExit: true, token, gracefulWait: TimeSpan.FromSeconds(10));
-        log.Add(user, "killed", null, ActivityKind.Success);
-        Progress("killed");
-    }
-
-    /// <summary>Asks the server to quit, then closes its window, then ends the process.</summary>
-    private async Task CloseServerAsync(int pid, bool askToExit, CancellationToken token, TimeSpan? gracefulWait = null)
-    {
         lock (gate) expectingExit = true;
-        if (pid == 0) return;
-
-        if (askToExit)
-        {
-            try
-            {
-                JsonElement reply = await pipe.SendAsync("exit", TimeSpan.FromSeconds(10), token);
-                if (IsOk(reply) && await WaitForExitAsync(pid, gracefulWait ?? TimeSpan.FromSeconds(60), token)) return;
-            }
-            catch (ServerUnreachableException)
-            {
-                // Not answering; fall through to closing the window.
-            }
-        }
-
-        if (!IsAlive(pid)) return;
-
         try
         {
             using var process = Process.GetProcessById(pid);
-            process.CloseMainWindow();
+            // The launcher runs the engine as a child; end both.
+            process.Kill(entireProcessTree: true);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
-            return;
+            // Already gone.
         }
-
-        if (await WaitForExitAsync(pid, TimeSpan.FromSeconds(20), token)) return;
-
-        try
+        catch (Win32Exception)
         {
-            using var process = Process.GetProcessById(pid);
-            process.Kill();
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
-            return;
+            throw new OperationFailedException("needs_admin");
         }
 
-        if (!await WaitForExitAsync(pid, TimeSpan.FromSeconds(15), token))
-            throw new OperationFailedException("kill_failed");
+        DateTimeOffset deadline = DateTimeOffset.Now + TimeSpan.FromSeconds(20);
+        while (DateTimeOffset.Now < deadline && IsAlive(pid)) await Task.Delay(500, token);
+        if (IsAlive(pid)) throw new OperationFailedException("kill_failed");
+
+        activity.Add(user, "killed", null, ActivityKind.Success);
+        Progress("killed");
     }
 
     private void OnLaunchedExited(object sender, EventArgs e)
     {
         var process = (Process)sender;
         int exitCode = SafeExitCode(process);
-        bool wasRunning;
+        bool wasServing;
         lock (gate)
         {
             if (!ReferenceEquals(process, launched) || expectingExit) return;
-            wasRunning = seenRunningSinceLaunch;
+            wasServing = seenServingSinceLaunch;
         }
 
-        log.Add("panel", "crash_detected", exitCode.ToString(CultureInfo.InvariantCulture), ActivityKind.Error);
+        // 0 is a stop typed into the window or F10; that's the host's own choice.
+        if (exitCode == 0)
+        {
+            activity.Add("panel", "stopped_outside");
+            return;
+        }
 
-        // A server that never finished loading would just fail again.
-        if (!settings.RestartOnCrash || !wasRunning) return;
+        // Exits during startup are reported by the start itself.
+        if (!wasServing) return;
+
+        activity.Add("panel", "crash_detected", exitCode.ToString(CultureInfo.InvariantCulture), ActivityKind.Error);
+        if (!settings.RestartOnCrash) return;
 
         lock (crashTimes)
         {
@@ -572,7 +676,7 @@ public sealed class ServerSupervisor : BackgroundService
             crashTimes.RemoveAll(time => now - time > CrashWindow);
             if (crashTimes.Count >= MaxCrashRestarts)
             {
-                log.Add("panel", "crash_giveup", null, ActivityKind.Error);
+                activity.Add("panel", "crash_giveup", null, ActivityKind.Error);
                 return;
             }
             crashTimes.Add(now);
@@ -581,78 +685,95 @@ public sealed class ServerSupervisor : BackgroundService
         _ = Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
-            if (!TryStart("panel", out _)) log.Add("panel", "crash_restart_skipped");
+            if (!TryStart("panel", out _)) activity.Add("panel", "crash_restart_skipped");
         });
+    }
+
+    /// <summary>The server process: the one the panel started, else any running BannerlordCoopServer.</summary>
+    private Process FindServer()
+    {
+        lock (gate)
+        {
+            if (launched != null && !HasExited(launched))
+            {
+                try
+                {
+                    return Process.GetProcessById(SafeId(launched));
+                }
+                catch (ArgumentException)
+                {
+                    // Exited in between.
+                }
+            }
+        }
+
+        Process[] found = Process.GetProcessesByName(ProcessName);
+        Process alive = null;
+        foreach (Process process in found)
+        {
+            if (alive == null && !HasExited(process)) alive = process;
+            else process.Dispose();
+        }
+        return alive;
     }
 
     private int FindServerPid()
     {
-        int pid;
-        lock (gate)
-        {
-            if (launched != null && !HasExited(launched)) return SafeId(launched);
-            pid = knownPid;
-        }
-
-        return pid > 0 && IsAlive(pid) ? pid : 0;
+        using Process process = FindServer();
+        return process == null ? 0 : SafeId(process);
     }
 
-    /// <summary>True when <paramref name="pid"/> is a live process with the server exe's name.</summary>
-    private bool IsAlive(int pid)
+    private static bool IsAlive(int pid)
     {
+        if (pid == 0) return false;
         try
         {
             using var process = Process.GetProcessById(pid);
-            return !process.HasExited && string.Equals(process.ProcessName,
-                Path.GetFileNameWithoutExtension(settings.BannerlordExe), StringComparison.OrdinalIgnoreCase);
+            return !HasExited(process);
         }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException
-                                              or System.ComponentModel.Win32Exception)
+        catch (ArgumentException)
         {
             return false;
         }
     }
 
-    private async Task<bool> WaitForExitAsync(int pid, TimeSpan timeout, CancellationToken token)
+    private string ReadConfiguredSave()
     {
-        DateTimeOffset deadline = DateTimeOffset.Now + timeout;
-        while (DateTimeOffset.Now < deadline)
-        {
-            if (!IsAlive(pid)) return true;
-            await Task.Delay(500, token);
-        }
-        return !IsAlive(pid);
-    }
-
-    private string DescribePlayer(string controllerId)
-    {
-        if (Snapshot.Server is JsonElement server && server.TryGetProperty("players", out var players) &&
-            players.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var player in players.EnumerateArray())
-            {
-                if (GetString(player, "controllerId") != controllerId) continue;
-                return GetString(player, "hero") ?? GetString(player, "name") ?? controllerId;
-            }
-        }
-        return controllerId;
-    }
-
-    /// <summary>Players can join once the server reports the campaign loaded.</summary>
-    private static bool CampaignLoaded(ServerSnapshot state) =>
-        state.Server is JsonElement server && server.TryGetProperty("campaignLoaded", out var loaded) &&
-        loaded.ValueKind == JsonValueKind.True;
-
-    private static bool IsOk(JsonElement reply) =>
-        reply.ValueKind == JsonValueKind.Object && reply.TryGetProperty("ok", out var ok) &&
-        ok.ValueKind == JsonValueKind.True;
-
-    private static string GetString(JsonElement element, string name) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) &&
-        value.ValueKind == JsonValueKind.String
+        JsonElement? config = ReadConfig();
+        return config is JsonElement root && root.TryGetProperty("saveName", out var value) &&
+               value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+    }
 
+    private bool? ReadConfigBool(string name)
+    {
+        JsonElement? config = ReadConfig();
+        return config is JsonElement root && root.TryGetProperty(name, out var value) &&
+               value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
+    }
+
+    private JsonElement? ReadConfig()
+    {
+        string path = Path.Combine(settings.EffectiveDataDir, "server-config.json");
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
+            return document.RootElement.Clone();
+        }
+        catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>True while running, and also when the process can't be inspected (another account).</summary>
     private static bool HasExited(Process process)
     {
         try
@@ -662,6 +783,22 @@ public sealed class ServerSupervisor : BackgroundService
         catch (InvalidOperationException)
         {
             return true;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    private static DateTimeOffset? SafeStartTime(Process process)
+    {
+        try
+        {
+            return process.StartTime;
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            return null;
         }
     }
 
@@ -692,7 +829,7 @@ public sealed class ServerSupervisor : BackgroundService
     public override void Dispose()
     {
         lock (gate) launched?.Dispose();
-        refreshLock.Dispose();
+        typing.Dispose();
         base.Dispose();
     }
 }

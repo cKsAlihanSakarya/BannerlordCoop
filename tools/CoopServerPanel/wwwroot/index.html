@@ -247,11 +247,11 @@ const STRINGS = {
     cancel_shutdown: "Kapatmayı iptal et", back: "Vazgeç", activity: "Son işlemler",
     s_0: "Hemen", s_sec: "{0} sn", s_min: "{0} dk",
     state_running: "Sunucu açık", state_starting: "Sunucu açılıyor", state_stopped: "Sunucu kapalı", state_notResponding: "Sunucu yanıt vermiyor",
-    fact_save: "Kayıt: {0}", fact_next_save: "Açılınca yüklenecek kayıt: {0}", fact_no_save: "Yüklenecek kayıt seçilmemiş. panelsettings.json içinde SaveName'i doldur.",
+    fact_save: "Kayıt: {0}", fact_next_save: "Açılınca yüklenecek kayıt: {0}", fact_no_save: "Kayıt adı sunucunun server-config.json dosyasındaki saveName ayarından gelir.",
     fact_online: "{0} oyuncu bağlı", fact_loading: "Kayıt yükleniyor, bu birkaç dakika sürebilir.",
     fact_not_responding: "Yükleme ya da kayıt sürüyorsa biraz bekle. Uzun süre böyle kalırsa zorla kapat.",
     players: "Oyuncular", players_n: "Oyuncular ({0})", no_players: "Henüz kimse bağlanmadı.", players_offline_server: "Sunucu açılınca oyuncular burada görünür.",
-    online: "Bağlı", offline: "Bağlı değil", unstuck: "Kurtar (unstuck)",
+    online: "Bağlı", offline: "Bağlı değil", unstuck: "Kurtar (unstuck)", unstucking: "Kurtarılıyor…",
     confirm_stop_title: "Sunucu kapatılsın mı?", confirm_restart_title: "Sunucu yeniden başlatılsın mı?",
     confirm_stop_text: "Oyuncular uyarılır, {0} sonra herkes çıkarılır ve oyun kaydedilir.",
     confirm_now: "Oyuncular hemen çıkarılır ve oyun kaydedilir.",
@@ -265,10 +265,10 @@ const STRINGS = {
     countdown: "Oyuncular uyarıldı, {0} sn sonra kapanacak", countdown_nosec: "Oyuncular uyarıldı",
     draining: "Oyuncular çıkarılıyor", saving: "Oyun kaydediliyor", closing: "Sunucu kapanıyor", stopped: "Kaydedildi ve kapatıldı", killed: "Sunucu zorla kapatıldı",
     // failures
-    already_running: "Sunucu zaten açık.", no_save: "Hangi kaydın yükleneceği bilinmiyor. panelsettings.json içinde SaveName'i doldur.",
-    exe_missing: "Bannerlord.exe bulunamadı: {0}", start_failed: "Sunucu başlatılamadı: {0}",
-    start_exited: "Sunucu açılırken kapandı (çıkış kodu {0}). Coop_server.log dosyasına bak.",
-    start_timeout: "Sunucu 10 dakikada yanıt vermedi. Sunucuda panel destekli Coop sürümü kurulu mu?",
+    already_running: "Sunucu zaten açık.", 
+    exe_missing: "BannerlordCoopServer.exe bulunamadı: {0}. panelsettings.json içindeki ServerExe yolunu düzelt.", start_failed: "Sunucu başlatılamadı: {0}",
+    start_exited: "Sunucu açılırken kapandı (çıkış kodu {0}). Sunucunun logs klasöründeki son coop-server log dosyasına bak.",
+    start_timeout: "Sunucu 10 dakikada açılmadı. Sunucu penceresine bak.",
     not_responding: "Sunucu yanıt vermiyor. Takıldıysa zorla kapat.", shutdown_refused: "Sunucu kapatmayı reddetti: {0}",
     shutdown_timeout: "Kapatma beklenenden uzun sürdü. Sunucunun durumunu kontrol et.",
     save_failed: "Kayıt başarısız oldu, sunucu açık bırakıldı: {0}", stop_cancelled: "Kapatma iptal edildi.",
@@ -282,6 +282,19 @@ const STRINGS = {
     a_crash_detected: "Sunucu beklenmedik şekilde kapandı (çıkış kodu {0})",
     a_crash_giveup: "15 dakikada 3 kez çöktü, otomatik başlatma durduruldu",
     a_crash_restart_skipped: "Otomatik başlatma atlandı, başka bir işlem sürüyordu",
+    state_stopping: "Sunucu kapanıyor", fact_stopping: "Oyun kaydediliyor ve sunucu kapanıyor.",
+    problem_silent: "Sunucu bir buçuk dakikadır log yazmıyor, donmuş olabilir. Birkaç dakikada düzelmezse zorla kapat.",
+    problem_stuck_loading: "Sunucu 10 dakikadır açılıyor. Takıldıysa zorla kapatıp tekrar başlat.",
+    problem_no_log: "Sunucu çalışıyor ama logunu bulamıyorum. server-config.json içinde \"logFile\": true olmalı.",
+    log_disabled: "server-config.json içinde \"logFile\" kapalı. Panel sunucuyu logdan okuduğu için bunu true yap.",
+    joining: "Bağlanıyor…", pstate_handshake: "Bağlanıyor", "pstate_creating character": "Karakter oluşturuyor",
+    pstate_loading: "Kayıt yükleniyor", "pstate_on map": "Oyunda",
+    needs_admin: "Sunucu yönetici olarak çalışıyor ama panel değil. Paneli sağ tık > Yönetici olarak çalıştır ile aç.",
+    type_failed: "Sunucu penceresine komut yazılamadı.", no_echo: "Komut yazıldı ama sunucu tepki vermedi. Sunucu penceresinde yarım kalmış bir yazı varsa sil.",
+    player_not_found: "Oyuncu sunucunun kayıtlı oyuncuları arasında bulunamadı.", unstuck_refused: "Sunucu kurtarmayı reddetti.",
+    cancel_refused: "İptal edilemedi.", stop_timeout: "Sunucu 2 dakikada kapanmadı. Gerekirse zorla kapat.",
+    start_verification: "Sunucu Coop modunu doğrulayamadı (çıkış kodu 4). Modu Workshop'tan yeniden indir (Steam > Bannerlord > Özellikler > Yüklü dosyalar > Doğrula).",
+    a_stopped_outside: "Sunucu kendi penceresinden kapatıldı", a_start_verification: "Sunucu Coop modunu doğrulayamadı (çıkış kodu {0})",
   },
   en: {
     sign_out: "Sign out", signin_title: "Server panel", signin_lead: "Sign in with the panel password your host gave you. Your name shows in the activity list.",
@@ -292,11 +305,11 @@ const STRINGS = {
     cancel_shutdown: "Cancel shutdown", back: "Go back", activity: "Recent activity",
     s_0: "None", s_sec: "{0} s", s_min: "{0} min",
     state_running: "Server is running", state_starting: "Server is starting", state_stopped: "Server is stopped", state_notResponding: "Server is not responding",
-    fact_save: "Save: {0}", fact_next_save: "Loads save {0} when started", fact_no_save: "No save is set. Fill in SaveName in panelsettings.json.",
+    fact_save: "Save: {0}", fact_next_save: "Loads save {0} when started", fact_no_save: "The save comes from saveName in the server's server-config.json.",
     fact_online: "{0} players connected", fact_loading: "Loading the save. This can take a few minutes.",
     fact_not_responding: "If it is loading or saving, give it a minute. If it stays like this, force stop it.",
     players: "Players", players_n: "Players ({0})", no_players: "Nobody has joined yet.", players_offline_server: "Players show here once the server is running.",
-    online: "Connected", offline: "Not connected", unstuck: "Unstuck",
+    online: "Connected", offline: "Not connected", unstuck: "Unstuck", unstucking: "Unsticking…",
     confirm_stop_title: "Stop the server?", confirm_restart_title: "Restart the server?",
     confirm_stop_text: "Players are warned, everyone is disconnected after {0}, and the game is saved.",
     confirm_now: "Players are disconnected right away and the game is saved.",
@@ -308,10 +321,10 @@ const STRINGS = {
     stop_requested: "Stop requested", restart_requested: "Restart requested", kill_requested: "Force stopping the server",
     countdown: "Players warned. Closing in {0} s", countdown_nosec: "Players warned",
     draining: "Disconnecting players", saving: "Saving the game", closing: "Closing the server", stopped: "Saved and stopped", killed: "Server force-stopped",
-    already_running: "The server is already running.", no_save: "No save to load. Fill in SaveName in panelsettings.json.",
-    exe_missing: "Bannerlord.exe not found: {0}", start_failed: "Couldn't start the server: {0}",
-    start_exited: "The server closed while starting (exit code {0}). Check Coop_server.log.",
-    start_timeout: "The server didn't answer within 10 minutes. Does it run the panel-enabled Coop build?",
+    already_running: "The server is already running.", 
+    exe_missing: "BannerlordCoopServer.exe not found: {0}. Fix ServerExe in panelsettings.json.", start_failed: "Couldn't start the server: {0}",
+    start_exited: "The server closed while starting (exit code {0}). Check the newest coop-server log in its logs folder.",
+    start_timeout: "The server didn't finish starting within 10 minutes. Check its window.",
     not_responding: "The server isn't answering. Force stop it if it's stuck.", shutdown_refused: "The server refused to shut down: {0}",
     shutdown_timeout: "The shutdown took longer than expected. Check the server.",
     save_failed: "Saving failed, so the server was left running: {0}", stop_cancelled: "Shutdown cancelled.",
@@ -324,21 +337,37 @@ const STRINGS = {
     a_crash_detected: "Server closed unexpectedly (exit code {0})",
     a_crash_giveup: "Crashed 3 times in 15 minutes; automatic start is paused",
     a_crash_restart_skipped: "Automatic start skipped; another action was running",
+    state_stopping: "Server is stopping", fact_stopping: "Saving the game and shutting down.",
+    problem_silent: "The server hasn't written to its log for 90 seconds and may be frozen. Force stop it if this lasts.",
+    problem_stuck_loading: "The server has been starting for 10 minutes. If it's stuck, force stop and start it again.",
+    problem_no_log: "The server runs but its log can't be found. \"logFile\" must be true in server-config.json.",
+    log_disabled: "\"logFile\" is off in server-config.json. The panel reads the server through its log, so set it to true.",
+    joining: "Joining…", pstate_handshake: "Connecting", "pstate_creating character": "Creating a character",
+    pstate_loading: "Loading the save", "pstate_on map": "Playing",
+    needs_admin: "The server runs as administrator but the panel doesn't. Start the panel with right-click > Run as administrator.",
+    type_failed: "Couldn't type into the server window.", no_echo: "The command was typed but the server didn't react. Clear any half-typed text in the server window.",
+    player_not_found: "That player isn't among the server's registered players.", unstuck_refused: "The server refused the unstuck.",
+    cancel_refused: "Couldn't cancel.", stop_timeout: "The server didn't close within 2 minutes. Force stop it if needed.",
+    start_verification: "The server couldn't verify the Coop mod (exit code 4). Verify the mod files through Steam and try again.",
+    a_stopped_outside: "The server was stopped from its own window", a_start_verification: "The server couldn't verify the Coop mod (exit code {0})",
   },
 };
 
 // Activity codes that describe the server rather than something a person did.
 const SYSTEM_CODES = new Set(["started", "stopped", "killed", "crash_detected", "crash_giveup", "crash_restart_skipped",
   "already_running", "no_save", "exe_missing", "start_failed", "start_exited", "start_timeout", "not_responding",
-  "shutdown_refused", "shutdown_timeout", "save_failed", "stop_cancelled", "not_running", "kill_failed", "unexpected_error"]);
+  "shutdown_refused", "shutdown_timeout", "save_failed", "stop_cancelled", "not_running", "kill_failed", "unexpected_error",
+  "stopped_outside", "start_verification", "needs_admin", "type_failed", "no_echo", "stop_timeout", "log_disabled", "not_responding"]);
 
-const STATE_COLORS = { running: "var(--green)", starting: "var(--amber)", stopped: "var(--muted)", notResponding: "var(--red)" };
+const STATE_COLORS = { running: "var(--green)", starting: "var(--amber)", stopping: "var(--amber)", stopped: "var(--muted)", notResponding: "var(--red)" };
 const WARNING_CHOICES = [0, 10, 30, 60, 120, 300, 600];
 
 let lang = pickLanguage();
 let status = null;
 let warnChosen = null;
 let pollTimer = null;
+// Players whose unstuck is still running, so a re-render keeps their button busy.
+const unstucking = new Set();
 
 const $ = (id) => document.getElementById(id);
 
@@ -433,51 +462,50 @@ async function refresh() {
 
 function render() {
   const s = status;
-  const server = s.server;
   const op = s.operation;
   const opRunning = !!(op && op.running);
-  const players = (server && server.players) || [];
-  const online = players.filter((p) => p.connected);
+  const players = s.players || [];
 
   $("who").textContent = t("signed_in_as", s.user);
 
-  // A server that answers but is still loading its save reads as starting.
+  // A launch the panel just made reads as starting before the server's window appears.
   const launching = opRunning && ["start_requested", "starting"].includes(op.code);
-  const shown = (s.state === "running" && !server.campaignLoaded) || (s.state === "stopped" && launching)
-    ? "starting" : s.state;
+  const shown = s.state === "stopped" && launching ? "starting" : s.state;
 
   // Headline and banner
   const pennant = $("state-pennant");
   pennant.style.setProperty("--state-color", STATE_COLORS[shown] || "var(--muted)");
-  const countingDown = opRunning && ["countdown", "draining", "saving", "closing", "starting", "start_requested"].includes(op.code);
-  pennant.classList.toggle("sway", shown === "starting" || countingDown);
+  const busy = opRunning && ["countdown", "draining", "saving", "closing", "starting", "start_requested"].includes(op.code);
+  pennant.classList.toggle("sway", shown === "starting" || shown === "stopping" || busy);
   $("state-title").textContent = t("state_" + shown);
 
   const facts = [];
+  const save = s.save || s.nextSave;
   if (shown === "running") {
-    if (server.launchSave) facts.push(t("fact_save", server.launchSave));
-    facts.push(t("fact_online", online.length));
+    if (save) facts.push(t("fact_save", save));
+    facts.push(t("fact_online", players.length));
   } else if (shown === "starting") {
-    const save = (server && server.launchSave) || s.nextSave;
     if (save) facts.push(t("fact_save", save));
     facts.push(t("fact_loading"));
-  } else if (s.state === "stopped") {
+  } else if (shown === "stopping") {
+    facts.push(t("fact_stopping"));
+  } else if (shown === "stopped") {
     facts.push(s.nextSave ? t("fact_next_save", s.nextSave) : t("fact_no_save"));
   } else {
-    if (s.problem) facts.push(s.problem);
-    facts.push(t("fact_not_responding"));
+    facts.push(t("problem_" + (s.problem || "silent")));
   }
+  if (s.logFileEnabled === false) facts.push(t("log_disabled"));
   $("facts").replaceChildren(...facts.map((f) => { const p = document.createElement("p"); p.textContent = f; return p; }));
 
   // Buttons
-  const running = s.state === "running";
+  const running = shown === "running";
   $("btn-start").hidden = shown !== "stopped";
-  $("btn-start").disabled = opRunning || !s.nextSave;
+  $("btn-start").disabled = opRunning;
   $("btn-restart").hidden = !running;
   $("btn-stop").hidden = !running;
   $("warn-wrap").hidden = !running;
-  $("btn-restart").disabled = $("btn-stop").disabled = opRunning || !(server && server.campaignLoaded);
-  $("btn-kill").hidden = !(s.state === "notResponding" || s.state === "starting" || running);
+  $("btn-restart").disabled = $("btn-stop").disabled = opRunning;
+  $("btn-kill").hidden = !["notResponding", "starting", "running", "stopping"].includes(shown) || launching;
   $("btn-kill").disabled = opRunning && op.name === "kill";
   if (warnChosen === null) { warnChosen = String(s.warningSeconds); $("warn").value = warnChosen; }
 
@@ -496,10 +524,8 @@ function render() {
   }
 
   // Players
-  const heading = $("players-heading");
-  heading.textContent = running && server.campaignLoaded ? t("players_n", online.length) : t("players");
-  const sorted = [...players].sort((a, b) => Number(b.connected) - Number(a.connected));
-  $("roster").replaceChildren(...sorted.map(renderPlayer));
+  $("players-heading").textContent = running ? t("players_n", players.length) : t("players");
+  $("roster").replaceChildren(...players.map((p) => renderPlayer(p, running && !opRunning)));
   const empty = $("roster-empty");
   empty.hidden = players.length > 0;
   empty.textContent = running ? t("no_players") : t("players_offline_server");
@@ -508,22 +534,25 @@ function render() {
   $("activity").replaceChildren(...(s.activity || []).map(renderActivity));
 }
 
-function renderPlayer(p) {
+function renderPlayer(p, canAct) {
   const li = document.createElement("li");
+  const joining = p.name === "(joining)";
   const name = document.createElement("div");
   name.className = "hero-name";
-  name.textContent = p.hero || p.name || p.controllerId;
+  name.textContent = joining ? t("joining") : p.name;
   const meta = document.createElement("div");
-  meta.className = "meta" + (p.connected ? " online" : "");
+  meta.className = "meta" + (p.state === "on map" ? " online" : "");
   const dot = document.createElement("span");
   dot.className = "dot";
-  meta.append(dot, document.createTextNode((p.connected ? t("online") : t("offline")) + (p.hero && p.name ? ", " + p.name : "")));
+  meta.append(dot, document.createTextNode(t("pstate_" + p.state) !== "pstate_" + p.state ? t("pstate_" + p.state) : p.state));
   li.append(name, meta);
-  if (p.connected) {
+  if (!joining) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "btn small";
-    button.textContent = t("unstuck");
+    const busy = unstucking.has(p.name);
+    button.textContent = busy ? t("unstucking") : t("unstuck");
+    button.disabled = !canAct || busy;
     button.addEventListener("click", () => unstuck(p, button));
     li.append(button);
   }
@@ -572,13 +601,15 @@ async function runAction(path, body) {
 
 async function unstuck(player, button) {
   button.disabled = true;
+  button.textContent = t("unstucking");
+  unstucking.add(player.name);
   try {
-    const { status: code, data } = await api("/api/unstuck", { controllerId: player.controllerId });
+    const { status: code, data } = await api("/api/unstuck", { name: player.name });
     if (code === 401) { showSignIn(); return; }
-    if (data && data.ok) showToast(t("unstuck_done", player.hero || player.name || player.controllerId));
-    else showToast((data && (data.message || t(data.error))) || t("unexpected_error", ""), true);
+    if (data && data.ok) showToast(t("unstuck_done", player.name));
+    else showToast(failureText(data), true);
   } finally {
-    button.disabled = false;
+    unstucking.delete(player.name);
     refresh();
   }
 }
@@ -634,9 +665,17 @@ $("btn-kill").addEventListener("click", async () => {
 
 $("btn-cancel").addEventListener("click", async () => {
   const { data } = await api("/api/cancel", {});
-  if (data && !data.ok) showToast(data.message || t("unexpected_error", ""), true);
+  if (data && !data.ok) showToast(failureText(data), true);
   refresh();
 });
+
+// A translated reason, plus the server's own words when it gave any.
+function failureText(data) {
+  if (!data) return t("unexpected_error", "");
+  const reason = data.error ? t(data.error, data.message || "") : "";
+  if (data.message && reason.indexOf(data.message) < 0) return (reason ? reason + "\n" : "") + data.message;
+  return reason || t("unexpected_error", "");
+}
 
 applyStaticText();
 (async () => {
