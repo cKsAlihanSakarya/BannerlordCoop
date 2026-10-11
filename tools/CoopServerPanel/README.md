@@ -49,6 +49,24 @@ cloudflared tunnel --url http://localhost:8090
 
 It prints a `https://<words>.trycloudflare.com` address to share. The address changes each time `cloudflared` restarts; a named tunnel on a Cloudflare account keeps a fixed one. Use a long panel password, because the address is reachable from anywhere.
 
+## Discord bot
+
+The panel can also run a Discord bot with the same actions as slash commands: `/durum`, `/baslat`, `/yeniden-baslat`, `/kapat`, `/iptal`, `/zorla-kapat`, `/unstuck`, `/at`, `/duyuru`, `/kaydet`. It posts to a channel when the server starts, stops or crashes, and when players join or leave. It connects out to Discord, so it needs no tunnel or open port.
+
+1. Create an application at https://discord.com/developers/applications, open Bot, reset and copy the token. No privileged intents are needed.
+2. Under OAuth2, URL Generator, tick `bot` and `applications.commands`, give it Send Messages, open the link and add the bot to the server.
+3. Fill in `panelsettings.json` and restart the panel:
+
+| Setting | Meaning |
+| --- | --- |
+| `DiscordToken` | the bot token, empty turns the bot off |
+| `DiscordGuildId` | the server ID, where the commands are registered |
+| `DiscordRoleIds` | role IDs whose members may use the commands; empty means nobody |
+| `DiscordChannelId` | channel for notices, empty for none |
+| `DiscordNotifyPlayers` | also post joins and leaves |
+
+Replies are in Turkish. The web page shows whether the bot is connected.
+
 ## Manual test
 
 1. Start the panel and sign in.

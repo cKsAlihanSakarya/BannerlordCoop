@@ -39,6 +39,30 @@ public sealed class PanelSettings
     /// <summary>Extra launch arguments appended verbatim, for advanced setups.</summary>
     public string ExtraArguments { get; set; } = "";
 
+    /// <summary>The Discord bot's token. Empty turns the bot off.</summary>
+    public string DiscordToken { get; set; } = "";
+
+    /// <summary>The Discord server (guild) the bot's slash commands are registered in.</summary>
+    public string DiscordGuildId { get; set; } = "";
+
+    /// <summary>Roles whose members may use the commands. Empty: nobody may.</summary>
+    public string[] DiscordRoleIds { get; set; } = Array.Empty<string>();
+
+    /// <summary>Channel for start, stop and crash notices. Empty: no notices.</summary>
+    public string DiscordChannelId { get; set; } = "";
+
+    /// <summary>Also post when a player joins or leaves.</summary>
+    public bool DiscordNotifyPlayers { get; set; } = true;
+
+    /// <summary>Test hook: the Discord REST base. Leave at the default.</summary>
+    public string DiscordApiBase { get; set; } = "https://discord.com/api/v10";
+
+    /// <summary>Test hook: the Discord gateway address. Leave at the default.</summary>
+    public string DiscordGatewayUrl { get; set; } = "wss://gateway.discord.gg/?v=10&encoding=json";
+
+    [JsonIgnore]
+    public bool DiscordEnabled => !string.IsNullOrWhiteSpace(DiscordToken);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -98,6 +122,9 @@ public sealed class PanelSettings
             throw new InvalidDataException("ServerExe must be the path of BannerlordCoopServer.exe.");
         if (PanelPassword.Length < 6)
             throw new InvalidDataException("PanelPassword must be at least 6 characters.");
+        if (DiscordEnabled && !ulong.TryParse(DiscordGuildId, out _))
+            throw new InvalidDataException("DiscordGuildId must be the server ID when DiscordToken is set.");
+        DiscordRoleIds ??= Array.Empty<string>();
     }
 
     private static string GeneratePassword()

@@ -55,6 +55,8 @@ builder.Services.AddSingleton<IConsoleTyper>(OperatingSystem.IsWindows()
 builder.Services.AddSingleton<ActivityLog>();
 builder.Services.AddSingleton<ServerSupervisor>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ServerSupervisor>());
+builder.Services.AddSingleton<DiscordBot>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<DiscordBot>());
 builder.Services.AddSingleton<LoginThrottle>();
 
 builder.Services
@@ -141,7 +143,7 @@ app.MapPost("/api/logout", async (HttpContext context) =>
 
 var api = app.MapGroup("/api").RequireAuthorization();
 
-api.MapGet("/status", (HttpContext context, ServerSupervisor supervisor, ActivityLog log) =>
+api.MapGet("/status", (HttpContext context, ServerSupervisor supervisor, ActivityLog log, DiscordBot discord) =>
 {
     ServerSnapshot snapshot = supervisor.Snapshot;
     return Results.Json(new
@@ -157,6 +159,7 @@ api.MapGet("/status", (HttpContext context, ServerSupervisor supervisor, Activit
         nextSave = supervisor.ConfiguredSave,
         logFileEnabled = supervisor.LogFileEnabled,
         warningSeconds = settings.WarningSeconds,
+        discord = discord.Status,
         activity = log.Recent(30),
     });
 });

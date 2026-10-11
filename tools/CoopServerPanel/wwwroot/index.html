@@ -158,6 +158,7 @@ dialog .actions { justify-content: flex-end; margin: 0; }
 <main>
   <div class="topbar">
     <span class="who" id="who"></span>
+    <span id="discord-state"></span>
     <span class="lang" role="group" aria-label="Language">
       <button type="button" data-lang="tr">TR</button><button type="button" data-lang="en">EN</button>
     </span>
@@ -299,6 +300,8 @@ const STRINGS = {
     a_crash_detected: "Sunucu beklenmedik şekilde kapandı (çıkış kodu {0})",
     a_crash_giveup: "15 dakikada 3 kez çöktü, otomatik başlatma durduruldu",
     a_crash_restart_skipped: "Otomatik başlatma atlandı, başka bir işlem sürüyordu",
+    discord_connected: "Discord botu bağlı", discord_connecting: "Discord botu bağlanıyor…",
+    discord_token_rejected: "Discord token'ı reddedildi", discord_setup_rejected: "Discord botu reddetti",
     kick: "At (kick)", confirm_kick_title: "{0} sunucudan atılsın mı?", confirm_kick_text: "Oyuncunun bağlantısı kesilir. İstediği zaman tekrar girebilir.",
     kick_done: "{0} sunucudan atıldı.", kick_refused: "Sunucu atmayı reddetti.",
     save_now: "Şimdi kaydet", saving_now: "Kaydediliyor…", save_done: "Dünya kaydedildi.", save_refused: "Kayıt başarısız.",
@@ -361,6 +364,8 @@ const STRINGS = {
     a_crash_detected: "Server closed unexpectedly (exit code {0})",
     a_crash_giveup: "Crashed 3 times in 15 minutes; automatic start is paused",
     a_crash_restart_skipped: "Automatic start skipped; another action was running",
+    discord_connected: "Discord bot connected", discord_connecting: "Discord bot connecting…",
+    discord_token_rejected: "Discord rejected the token", discord_setup_rejected: "Discord refused the bot",
     kick: "Kick", confirm_kick_title: "Kick {0} from the server?", confirm_kick_text: "The player is disconnected and can join again at any time.",
     kick_done: "Kicked {0}.", kick_refused: "The server refused the kick.",
     save_now: "Save now", saving_now: "Saving…", save_done: "World saved.", save_refused: "Saving failed.",
@@ -499,6 +504,7 @@ function render() {
   const players = s.players || [];
 
   $("who").textContent = t("signed_in_as", s.user);
+  $("discord-state").textContent = s.discord && s.discord !== "off" ? t("discord_" + s.discord) : "";
 
   // A launch the panel just made reads as starting before the server's window appears.
   const launching = opRunning && ["start_requested", "starting"].includes(op.code);

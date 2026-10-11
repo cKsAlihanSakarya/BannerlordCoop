@@ -27,6 +27,9 @@ public sealed class ActivityLog
         this.logger = logger;
     }
 
+    /// <summary>Raised after each entry, outside the lock; the Discord bot posts some of them.</summary>
+    public event Action<ActivityEntry> Added;
+
     public void Add(string user, string code, string detail = null, ActivityKind kind = ActivityKind.Info)
     {
         var entry = new ActivityEntry(DateTimeOffset.Now, user, code, detail, kind);
@@ -34,6 +37,15 @@ public sealed class ActivityLog
         {
             entries.AddFirst(entry);
             while (entries.Count > Capacity) entries.RemoveLast();
+        }
+
+        try
+        {
+            Added?.Invoke(entry);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "An activity listener failed");
         }
 
         if (kind == ActivityKind.Error)
